@@ -18,31 +18,41 @@ TOTAL_EDGE_THRESHOLD = 4.5  # points of disagreement before a total is worth fla
 MONEYLINE_EDGE_THRESHOLD = 0.15  # probability-point disagreement before a moneyline is worth flagging
 
 
-def compute_team_ratings(schedules_df, games_window=17):
-    """
-    Build a simple power rating per team: average points scored and average points
-    allowed over each team's last `games_window` completed games. This is the
-    foundation the model uses to predict spreads, totals, and moneylines.
-    """
+def build_team_games(schedules_df):
+    """Reshape a schedule (one row per game) into one row per team per game, with
+    that team's scored/allowed points — the raw material ratings are built from."""
     completed = schedules_df.dropna(subset=["home_score", "away_score"]).copy()
     completed = completed.sort_values(["season", "week"])
 
-    # Reshape each game into one row per team (scored/allowed), so we can average per team
     home_rows = completed[["season", "week", "home_team", "home_score", "away_score"]].rename(
         columns={"home_team": "team", "home_score": "scored", "away_score": "allowed"}
     )
     away_rows = completed[["season", "week", "away_team", "away_score", "home_score"]].rename(
         columns={"away_team": "team", "away_score": "scored", "home_score": "allowed"}
     )
-    team_games = pd.concat([home_rows, away_rows]).sort_values(["team", "season", "week"])
+    return pd.concat([home_rows, away_rows]).sort_values(["team", "season", "week"])
 
+
+def ratings_from_team_games(team_games, games_window=17):
+    """Average each team's last `games_window` games (from an already-reshaped team_games
+    table) into a power rating. Split out from compute_team_ratings so a backtest can pass
+    in only the games that happened *before* a given point in time."""
     recent = team_games.groupby("team").tail(games_window)
-    ratings = (
+    return (
         recent.groupby("team")
         .agg(avg_scored=("scored", "mean"), avg_allowed=("allowed", "mean"), games=("scored", "count"))
         .reset_index()
     )
-    return ratings
+
+
+def compute_team_ratings(schedules_df, games_window=17):
+    """
+    Build a simple power rating per team: average points scored and average points
+    allowed over each team's last `games_window` completed games. This is the
+    foundation the model uses to predict spreads, totals, and moneylines.
+    """
+    team_games = build_team_games(schedules_df)
+    return ratings_from_team_games(team_games, games_window)
 
 
 def predict_matchup(ratings_df, home_team, away_team):
