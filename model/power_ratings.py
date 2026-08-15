@@ -7,58 +7,94 @@ logger = logging.getLogger(__name__)
 HOME_FIELD_ADVANTAGE = 1.5  # points; rough long-run NFL average home-field edge
 MARGIN_STD_DEV = 13.5  # typical standard deviation of NFL final score margins, used to turn a predicted margin into a win probability
 
-# These thresholds are calibrated against how much this model naturally disagrees with the
-# market on ANY given game, even when it's not actually right (measured empirically: spread
-# disagreement has a ~3.0 point stdev, total ~2.3 points, moneyline probability ~0.09).
-# Thresholds are set at roughly 1.5-2x that noise band so only the more unusual disagreements
-# get flagged — this reduces false positives but does NOT mean flagged bets are proven correct;
-# only a backtest against actual game outcomes can show whether the model has real skill.
-SPREAD_EDGE_THRESHOLD = 5.0  # points of disagreement with the market before a spread is worth flagging
-TOTAL_EDGE_THRESHOLD = 4.5  # points of disagreement before a total is worth flagging
-MONEYLINE_EDGE_THRESHOLD = 0.15  # probability-point disagreement before a moneyline is worth flagging
+# Thresholds are calibrated against a walk-forward backtest of 2019-2024 (see
+# backtest/run_backtest.py), which is the real test — not just how much the model
+# naturally disagrees with the market. A threshold sweep across that backtest found:
+#   - Spread: a genuine, monotonic edge — bigger disagreements win more often
+#     (50% at edge>=0 up to 56-60% at edge>=8-10). Set to 8.0, which balances a
+#     reasonable sample size (156 bets, 56.4% win rate, +9.6% ROI) against edge strength.
+#   - Total: NO signal at any threshold tested (0-8 points) — win rate stayed flat
+#     around 49-50% and ROI stayed negative throughout. Kept enabled per Bradley's
+#     explicit decision despite this (2026-08-15) — treat its picks as unproven/
+#     exploratory, not evidence of real edge, until the total-prediction approach
+#     itself is rethought.
+#   - Moneyline: disabled entirely (see screener/pipeline.py) — even after the
+#     opponent-adjustment fix, no threshold showed a clean, well-sampled edge.
+SPREAD_EDGE_THRESHOLD = 8.0  # points of disagreement with the market before a spread is worth flagging
+TOTAL_EDGE_THRESHOLD = 4.5  # points of disagreement before a total is worth flagging — NOT backed by backtest evidence of an edge
+MONEYLINE_EDGE_THRESHOLD = 0.15  # unused live (moneyline screening is disabled) — kept for the backtest harness
+
+
+RATING_ITERATIONS = 15  # how many passes the opponent-adjustment loop runs before settling
 
 
 def build_team_games(schedules_df):
     """Reshape a schedule (one row per game) into one row per team per game, with
-    that team's scored/allowed points — the raw material ratings are built from."""
+    that team's scored/allowed points and who they played — the raw material
+    ratings are built from. Keeping the opponent is what lets ratings be adjusted
+    for strength of schedule instead of just averaging raw scoring."""
     completed = schedules_df.dropna(subset=["home_score", "away_score"]).copy()
     completed = completed.sort_values(["season", "week"])
 
-    home_rows = completed[["season", "week", "home_team", "home_score", "away_score"]].rename(
-        columns={"home_team": "team", "home_score": "scored", "away_score": "allowed"}
+    home_rows = completed[["season", "week", "home_team", "away_team", "home_score", "away_score"]].rename(
+        columns={"home_team": "team", "away_team": "opponent", "home_score": "scored", "away_score": "allowed"}
     )
-    away_rows = completed[["season", "week", "away_team", "away_score", "home_score"]].rename(
-        columns={"away_team": "team", "away_score": "scored", "home_score": "allowed"}
+    away_rows = completed[["season", "week", "away_team", "home_team", "away_score", "home_score"]].rename(
+        columns={"away_team": "team", "home_team": "opponent", "away_score": "scored", "home_score": "allowed"}
     )
     return pd.concat([home_rows, away_rows]).sort_values(["team", "season", "week"])
 
 
-def ratings_from_team_games(team_games, games_window=17):
-    """Average each team's last `games_window` games (from an already-reshaped team_games
-    table) into a power rating. Split out from compute_team_ratings so a backtest can pass
-    in only the games that happened *before* a given point in time."""
-    recent = team_games.groupby("team").tail(games_window)
-    return (
-        recent.groupby("team")
-        .agg(avg_scored=("scored", "mean"), avg_allowed=("allowed", "mean"), games=("scored", "count"))
-        .reset_index()
-    )
-
-
-def compute_team_ratings(schedules_df, games_window=17):
+def ratings_from_team_games(team_games, games_window=17, iterations=RATING_ITERATIONS):
     """
-    Build a simple power rating per team: average points scored and average points
-    allowed over each team's last `games_window` completed games. This is the
+    Build opponent-adjusted offense/defense ratings from an already-reshaped team_games
+    table (each team's last `games_window` games). This replaces plain scoring averages
+    with an iterative fit: a team's offensive rating is how many points above/below
+    league average they score *after* accounting for how tough each opponent's defense
+    was, and vice versa for defense. Teams that padded their stats against weak
+    opponents get corrected down; teams that performed well against strong opponents
+    get corrected up. Split out from compute_team_ratings so a backtest can pass in only
+    the games that happened *before* a given point in time.
+    """
+    recent = team_games.groupby("team").tail(games_window).copy()
+    league_avg_score = recent["scored"].mean()
+
+    teams = recent["team"].unique()
+    off_rating = {t: 0.0 for t in teams}
+    def_rating = {t: 0.0 for t in teams}
+
+    for _ in range(iterations):
+        opp_def = recent["opponent"].map(def_rating).fillna(0.0)
+        opp_off = recent["opponent"].map(off_rating).fillna(0.0)
+        off_component = recent["scored"] - league_avg_score - opp_def
+        def_component = recent["allowed"] - league_avg_score - opp_off
+        off_rating = off_component.groupby(recent["team"]).mean().to_dict()
+        def_rating = def_component.groupby(recent["team"]).mean().to_dict()
+
+    games_played = recent.groupby("team").size()
+    ratings = pd.DataFrame({
+        "team": list(off_rating.keys()),
+        "off_rating": list(off_rating.values()),
+        "def_rating": [def_rating[t] for t in off_rating.keys()],
+    })
+    ratings["league_avg_score"] = league_avg_score
+    ratings["games"] = ratings["team"].map(games_played)
+    return ratings
+
+
+def compute_team_ratings(schedules_df, games_window=17, iterations=RATING_ITERATIONS):
+    """
+    Build an opponent-adjusted power rating per team from a full schedule. This is the
     foundation the model uses to predict spreads, totals, and moneylines.
     """
     team_games = build_team_games(schedules_df)
-    return ratings_from_team_games(team_games, games_window)
+    return ratings_from_team_games(team_games, games_window, iterations)
 
 
 def predict_matchup(ratings_df, home_team, away_team):
     """
-    Predict a score, spread, and total for one matchup by blending each team's
-    scoring average with the opponent's average points allowed.
+    Predict a score, spread, and total for one matchup: each team's opponent-adjusted
+    offensive rating against the other team's opponent-adjusted defensive rating.
     """
     home = ratings_df[ratings_df["team"] == home_team]
     away = ratings_df[ratings_df["team"] == away_team]
@@ -67,9 +103,10 @@ def predict_matchup(ratings_df, home_team, away_team):
 
     home = home.iloc[0]
     away = away.iloc[0]
+    league_avg_score = home["league_avg_score"]
 
-    predicted_home_score = (home["avg_scored"] + away["avg_allowed"]) / 2 + HOME_FIELD_ADVANTAGE / 2
-    predicted_away_score = (away["avg_scored"] + home["avg_allowed"]) / 2 - HOME_FIELD_ADVANTAGE / 2
+    predicted_home_score = league_avg_score + home["off_rating"] + away["def_rating"] + HOME_FIELD_ADVANTAGE / 2
+    predicted_away_score = league_avg_score + away["off_rating"] + home["def_rating"] - HOME_FIELD_ADVANTAGE / 2
 
     predicted_spread = predicted_home_score - predicted_away_score  # positive = home favored
     predicted_total = predicted_home_score + predicted_away_score

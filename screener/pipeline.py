@@ -5,7 +5,7 @@ from screener.fetch_stats import get_weekly_player_stats, get_schedules
 from screener.fetch_odds import get_events, get_game_odds, get_player_props
 from screener.team_map import get_team_name_to_abbr, to_abbr
 from screener.scoring import rank_props, rank_games
-from model.power_ratings import compute_team_ratings, predict_matchup, screen_spread, screen_total, screen_moneyline
+from model.power_ratings import compute_team_ratings, predict_matchup, screen_spread, screen_total
 from model.player_trends import screen_player_prop, player_current_team
 
 logger = logging.getLogger(__name__)
@@ -19,8 +19,16 @@ def get_stats_years():
     return [year - 2, year - 1, year]
 
 
-def run_game_screener(schedules_df, name_map, markets="h2h,spreads,totals"):
-    """Screen every upcoming NFL game's spread, total, and moneyline against our power-rating model."""
+def run_game_screener(schedules_df, name_map, markets="spreads,totals"):
+    """
+    Screen every upcoming NFL game's spread and total against our power-rating model.
+
+    Moneyline screening is intentionally left out: a backtest against 2019-2024 (see
+    backtest/run_backtest.py) showed it lost -20.8% ROI, because the model's win
+    probabilities never got as extreme as the market's on lopsided games, so it kept
+    betting big underdogs against teams that were favored for real reasons. Re-enable
+    once the model has been re-backtested and shown to be profitable on moneylines.
+    """
     ratings = compute_team_ratings(schedules_df)
     games = get_game_odds(markets=markets)
     flags = []
@@ -34,7 +42,7 @@ def run_game_screener(schedules_df, name_map, markets="h2h,spreads,totals"):
             logger.debug(f"Skipping {away_full} @ {home_full} — not enough rating data yet")
             continue
 
-        spread_lines, total_lines, home_ml_prices, away_ml_prices = [], [], [], []
+        spread_lines, total_lines = [], []
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
                 if market["key"] == "spreads":
@@ -45,12 +53,6 @@ def run_game_screener(schedules_df, name_map, markets="h2h,spreads,totals"):
                     for outcome in market["outcomes"]:
                         if outcome["name"] == "Over":
                             total_lines.append(outcome["point"])
-                elif market["key"] == "h2h":
-                    for outcome in market["outcomes"]:
-                        if outcome["name"] == home_full:
-                            home_ml_prices.append(outcome["price"])
-                        elif outcome["name"] == away_full:
-                            away_ml_prices.append(outcome["price"])
 
         game_context = {
             "home_team": home_abbr,
@@ -65,15 +67,6 @@ def run_game_screener(schedules_df, name_map, markets="h2h,spreads,totals"):
 
         if total_lines:
             flag = screen_total(prediction, sum(total_lines) / len(total_lines))
-            if flag:
-                flags.append({**flag, **game_context})
-
-        if home_ml_prices and away_ml_prices:
-            flag = screen_moneyline(
-                prediction,
-                sum(home_ml_prices) / len(home_ml_prices),
-                sum(away_ml_prices) / len(away_ml_prices),
-            )
             if flag:
                 flags.append({**flag, **game_context})
 
