@@ -74,6 +74,7 @@ This is the harder build and will take real iteration before it's trustworthy wi
 - Run screener and send email: `python main.py --send`
 - Run props only: `python main.py --props-only`
 - Run sides/totals only: `python main.py --games-only`
+- Test email without running screener: `python -m email_report.send --test`
 
 ## Conventions
 - Use descriptive variable names — no single-letter variables
@@ -89,6 +90,7 @@ This is the harder build and will take real iteration before it's trustworthy wi
 - This screener produces informational picks only — it never places bets or touches any sportsbook account
 
 ## Current Work Context
-**Status:** Project setup phase — folder structure and vision doc created, screener not yet built.
-**Next step:** Build the data-fetching layer (stats + odds), then get the two models producing output printed to screen, before wiring up email/scheduling.
-**Phase:** 1 of 2 (Phase 1 = working screener with manual runs, Phase 2 = automated email delivery on the Mon/Wed/Fri/Sat schedule)
+**Status:** Core pipeline built and verified against live data. API keys and Gmail app password are configured in `.env`. Game screener (spreads/totals/moneylines) runs end-to-end against real odds. Player props screener is built but untested against real props data — sportsbooks don't post NFL prop lines this far before the season (props start appearing closer to game week, matching the Wednesday run). Test email delivery confirmed working.
+**Known limitation:** The power-rating model isn't strength-of-schedule adjusted yet — a naive average can make a team look like value against many opponents just because their schedule so far was easy/hard, not because of a real edge. Edge thresholds were empirically recalibrated (see git history) to cut false positives, but the model has NOT been backtested against actual game outcomes, so treat picks as exploratory, not bet-worthy, until that happens.
+**Next step:** Once the season is closer and player props start appearing, verify the props screener end-to-end. Longer-term, consider building a proper opponent-adjusted rating system and backtesting both models against past seasons before trusting them with real money.
+**Phase:** 1 of 2 (Phase 1 = working screener with manual runs — mostly done; Phase 2 = automated email delivery on the Mon/Wed/Fri/Sat schedule — built but not activated, needs a GitHub remote + secrets)

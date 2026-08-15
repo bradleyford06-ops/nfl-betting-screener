@@ -5,6 +5,7 @@ Run: python main.py                — screen and print results
 Run: python main.py --send         — screen and send email to bradleyford5@hotmail.com
 Run: python main.py --props-only   — only screen player props
 Run: python main.py --games-only   — only screen spreads/totals/moneylines
+Run: python -m email_report.send --test — send a test email without running the screener
 """
 
 import argparse
