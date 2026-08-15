@@ -12,11 +12,15 @@ Claude — responsible for all code, architecture, and technical decisions.
 ## Two Strategies This Screener Identifies
 
 ### 1. Player Props — Trend-Based
-Simple, explainable comparison: a player's rolling/season average in a stat category vs. what the opposing defense allows in that same category. If both point the same direction and the sportsbook's line sits on the wrong side of that gap, it's flagged.
+A player's recent average in a stat category vs. what the opposing defense allows in that same category. If both point the same direction and the sportsbook's line sits on the wrong side of that gap, it's flagged.
 
 Example: a running back averages 60 rushing yards/game, the opposing defense allows well above average rushing yards, and the book's line is 55.5 — that's a flagged value bet.
 
-No custom point-prediction model here — just averages vs. line, kept easy to sanity-check by eye.
+**Opponent-adjusted (2026-08-15):** both sides of the comparison correct for strength of schedule, the same fix applied to the game model — a player's average is corrected using how tough each of their own past opponents was, and a defense's "allowed" number is corrected for the strength of the offenses it actually faced (not just a raw average). Reuses the same iterative rating math as the game model, run separately per stat/position.
+
+**Small samples & rookies:** a player needs at least 1 game of NFL history to get a trend at all, but the required edge scales up sharply for thin samples (a 1-game sample needs ~2.8x the usual gap before it's trusted). True rookie debuts (zero NFL games) can't be trended at all — rather than vanishing silently, they're listed in a separate "no data yet" section of the report so it's clear the model has no opinion on them, not that it missed them.
+
+This has moved a step past "just averages vs. line, easy to eyeball" to fix a real bias, but stays simpler than the game model — still no historical backtest exists for props (no free source of historical player-prop lines), so treat picks as reasoned, not proven.
 
 ### 2. Sides, Totals & Moneylines — Predictive Model
 An opponent-adjusted power-rating model (each team's offense/defense rating accounts for who they actually played, not just raw scoring averages) generates our own predicted spread and total for each game. Flagged when our number disagrees meaningfully with the market's line — the bigger the gap, the higher it ranks.
@@ -39,9 +43,10 @@ This is the harder build and took real iteration before the spread side became t
 ## Screening Criteria
 
 **Player Props (trend model):**
-- Player must have enough recent games to establish a reliable average (season-to-date, weighted toward recent games)
-- Opposing defense's allowed average in that stat category, same window
+- Player's opponent-adjusted average over their last 8 games (or fewer, down to 1, with a proportionally bigger required edge)
+- Opposing defense's opponent-adjusted allowed average in that stat category
 - Flag when the sportsbook line sits meaningfully below (or above, for unders) what both signals support
+- True rookie debuts (zero NFL games) are listed separately as "no data yet," not flagged
 
 **Sides / Totals / Moneylines (power-rating model):**
 - Team power ratings from scoring efficiency, yardage efficiency, turnover margin, and recent form

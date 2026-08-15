@@ -6,7 +6,7 @@ from screener.fetch_odds import get_events, get_game_odds, get_player_props
 from screener.team_map import get_team_name_to_abbr, to_abbr
 from screener.scoring import rank_props, rank_games
 from model.power_ratings import compute_team_ratings, predict_matchup, screen_spread, screen_total
-from model.player_trends import screen_player_prop, player_current_team
+from model.player_trends import screen_player_prop, player_current_team, has_nfl_history
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +74,17 @@ def run_game_screener(schedules_df, name_map, markets="spreads,totals"):
 
 
 def run_props_screener(weekly_df, name_map, games_window=8):
-    """Screen every available player prop line against the player-vs-defense trend model."""
+    """
+    Screen every available player prop line against the player-vs-defense trend model.
+
+    Players with zero NFL game history (true rookie debuts) can't have a trend computed —
+    rather than silently vanishing them, they're collected into a separate "no data yet"
+    list so Bradley can see which rookie props exist even though the model has no opinion.
+    """
     events = get_events()
     flags = []
+    no_data = []
+    ratings_cache = {}  # shared across all players in this run so shared position/stat combos aren't recomputed
 
     for event in events:
         home_full, away_full = event["home_team"], event["away_team"]
@@ -102,19 +110,29 @@ def run_props_screener(weekly_df, name_map, games_window=8):
 
         for (market_key, player_name), lines in lines_by_player_market.items():
             avg_line = sum(lines) / len(lines)
+
+            if not has_nfl_history(weekly_df, player_name):
+                no_data.append({
+                    "player": player_name,
+                    "market": market_key,
+                    "line": avg_line,
+                    "matchup": f"{away_abbr} @ {home_abbr}",
+                })
+                continue
+
             player_team = player_current_team(weekly_df, player_name)
             if player_team == home_abbr:
                 opponent = away_abbr
             elif player_team == away_abbr:
                 opponent = home_abbr
             else:
-                continue  # can't tell which side this player is on — skip rather than guess
+                continue  # has history, but team doesn't match this game — skip rather than guess
 
-            flag = screen_player_prop(weekly_df, player_name, market_key, opponent, avg_line, games_window)
+            flag = screen_player_prop(weekly_df, player_name, market_key, opponent, avg_line, games_window, ratings_cache)
             if flag:
                 flags.append(flag)
 
-    return rank_props(flags)
+    return rank_props(flags), no_data
 
 
 def run_screener(props_only=False, games_only=False):
@@ -125,6 +143,6 @@ def run_screener(props_only=False, games_only=False):
     name_map = get_team_name_to_abbr()
 
     game_flags = [] if props_only else run_game_screener(schedules_df, name_map)
-    prop_flags = [] if games_only else run_props_screener(weekly_df, name_map)
+    prop_flags, prop_no_data = ([], []) if games_only else run_props_screener(weekly_df, name_map)
 
-    return {"games": game_flags, "props": prop_flags}
+    return {"games": game_flags, "props": prop_flags, "props_no_data": prop_no_data}

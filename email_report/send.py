@@ -70,6 +70,9 @@ def send_test_email():
                 "explanation": "Test Player is averaging 62.0 rushing yards over their last 8 games, and SF allows 68.0 per game to RBs (league avg: 55.0) — the 55.5 line looks soft on the over.",
             }
         ],
+        "props_no_data": [
+            {"player": "Test Rookie", "market": "player_rush_yds", "line": 45.5, "matchup": "SF @ SEA"},
+        ],
     }
     body = send_report(fake_results)
     print("Test email sent successfully.")

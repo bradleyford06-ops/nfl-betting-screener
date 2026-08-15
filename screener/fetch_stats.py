@@ -60,31 +60,30 @@ def get_schedules(years):
     return df
 
 
-def get_defense_allowed(weekly_df, position, stat_column, games_window=8):
+def build_position_stat_team_games(weekly_df, position, stat_column):
     """
-    Compute, per team, the average of `stat_column` allowed to opposing players
-    at `position` over each team's last `games_window` games.
+    Reshape weekly player stats into one row per team per game, showing how much that
+    team's players at `position` produced in `stat_column`, and how much their opponent's
+    defense allowed (which is just the same number seen from the other side). Shaped
+    exactly like power_ratings.build_team_games so the same opponent-adjustment math
+    (built for team scoring) can be reused here for a single stat/position instead.
 
-    Example: get_defense_allowed(df, "RB", "rushing_yards") tells you how many
-    rushing yards each defense has been giving up to running backs recently.
+    Example: build_position_stat_team_games(df, "RB", "rushing_yards") gives, for every
+    team and every game, how many rushing yards their running backs produced that game.
     """
     position_df = weekly_df[weekly_df["position"] == position]
 
-    # Sum the stat across all players of that position, per opponent per game
-    per_game_allowed = (
-        position_df.groupby(["opponent_team", "season", "week"])[stat_column]
+    produced = (
+        position_df.groupby(["recent_team", "opponent_team", "season", "week"])[stat_column]
         .sum()
         .reset_index()
+        .rename(columns={"recent_team": "team", "opponent_team": "opponent", stat_column: "scored"})
     )
 
-    # Take each defense's most recent N games and average them
-    per_game_allowed = per_game_allowed.sort_values(["opponent_team", "season", "week"])
-    recent_allowed = (
-        per_game_allowed.groupby("opponent_team")
-        .tail(games_window)
-        .groupby("opponent_team")[stat_column]
-        .mean()
-        .reset_index()
-        .rename(columns={"opponent_team": "team", stat_column: "avg_allowed"})
-    )
-    return recent_allowed
+    # What a defense "allowed" in a game is just the opponent's production in that same
+    # game, looked up from the other side of the same table.
+    produced_lookup = produced.set_index(["team", "opponent", "season", "week"])["scored"]
+    mirror_keys = list(zip(produced["opponent"], produced["team"], produced["season"], produced["week"]))
+    produced["allowed"] = produced_lookup.reindex(mirror_keys).values
+
+    return produced.dropna(subset=["allowed"]).sort_values(["team", "season", "week"])

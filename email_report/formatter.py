@@ -17,8 +17,9 @@ def format_email(results):
 
     games = results.get("games", [])
     props = results.get("props", [])
+    props_no_data = results.get("props_no_data", [])
 
-    if not games and not props:
+    if not games and not props and not props_no_data:
         lines.append("No bets passed the screening criteria for this run.")
         return "\n".join(lines)
 
@@ -35,6 +36,18 @@ def format_email(results):
         lines.append("")
         for i, prop in enumerate(props, 1):
             lines += _format_prop_flag(i, prop)
+
+    if props_no_data:
+        lines.append(f"PLAYER PROPS — NO DATA YET  ({len(props_no_data)} players)")
+        lines.append("Rookies or players with no NFL game history — a line exists, but there's")
+        lines.append("nothing to trend on yet, so the model has no opinion on these.")
+        lines.append("=" * 60)
+        lines.append("")
+        for entry in props_no_data:
+            lines.append(f"  {entry['player']} — {entry['market']} {entry['line']} ({entry['matchup']})")
+        lines.append("")
+        lines.append("-" * 60)
+        lines.append("")
 
     lines.append("-" * 60)
     lines.append("Generated automatically by the NFL Betting Screener.")
