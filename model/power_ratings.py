@@ -7,9 +7,15 @@ logger = logging.getLogger(__name__)
 HOME_FIELD_ADVANTAGE = 1.5  # points; rough long-run NFL average home-field edge
 MARGIN_STD_DEV = 13.5  # typical standard deviation of NFL final score margins, used to turn a predicted margin into a win probability
 
-SPREAD_EDGE_THRESHOLD = 1.5  # points of disagreement with the market before a spread is worth flagging
-TOTAL_EDGE_THRESHOLD = 3.0  # points of disagreement before a total is worth flagging
-MONEYLINE_EDGE_THRESHOLD = 0.05  # probability-point disagreement before a moneyline is worth flagging
+# These thresholds are calibrated against how much this model naturally disagrees with the
+# market on ANY given game, even when it's not actually right (measured empirically: spread
+# disagreement has a ~3.0 point stdev, total ~2.3 points, moneyline probability ~0.09).
+# Thresholds are set at roughly 1.5-2x that noise band so only the more unusual disagreements
+# get flagged — this reduces false positives but does NOT mean flagged bets are proven correct;
+# only a backtest against actual game outcomes can show whether the model has real skill.
+SPREAD_EDGE_THRESHOLD = 5.0  # points of disagreement with the market before a spread is worth flagging
+TOTAL_EDGE_THRESHOLD = 4.5  # points of disagreement before a total is worth flagging
+MONEYLINE_EDGE_THRESHOLD = 0.15  # probability-point disagreement before a moneyline is worth flagging
 
 
 def compute_team_ratings(schedules_df, games_window=17):
