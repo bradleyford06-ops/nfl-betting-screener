@@ -19,9 +19,14 @@ Example: a running back averages 60 rushing yards/game, the opposing defense all
 No custom point-prediction model here — just averages vs. line, kept easy to sanity-check by eye.
 
 ### 2. Sides, Totals & Moneylines — Predictive Model
-A power-rating model built from team stats (offensive/defensive efficiency, scoring, etc.) generates our own predicted spread and total for each game. Flagged when our number disagrees meaningfully with the market's line — the bigger the gap, the higher it ranks.
+An opponent-adjusted power-rating model (each team's offense/defense rating accounts for who they actually played, not just raw scoring averages) generates our own predicted spread and total for each game. Flagged when our number disagrees meaningfully with the market's line — the bigger the gap, the higher it ranks.
 
-This is the harder build and will take real iteration before it's trustworthy with money. Starts simple (basic power ratings) and gets refined over time.
+**Backtested against 2019-2024 (see `backtest/`):**
+- **Spreads:** real, monotonic edge — bigger disagreements win more often. Live threshold flags disagreements of 8+ points (156 bets in the backtest, 56.4% win rate, +9.6% ROI).
+- **Moneylines:** disabled. Even after fixing the schedule-adjustment gap, no threshold showed a clean, well-sampled edge — flagging it lost money.
+- **Totals:** kept enabled per Bradley's explicit call, but the backtest found no edge at any threshold tested (flat ~49-50% win rate, negative ROI throughout). Treat its picks as unproven/exploratory, not a validated signal.
+
+This is the harder build and took real iteration before the spread side became trustworthy enough to flag with any confidence — see `backtest/run_backtest.py` to re-validate after any model change.
 
 ## Tech Stack
 - Language: Python 3 (via Anaconda)
@@ -64,6 +69,7 @@ This is the harder build and will take real iteration before it's trustworthy wi
   - `screener/fetch_odds.py` — pulls odds via The Odds API
   - `screener/pipeline.py` — runs both models, combines results
   - `screener/scoring.py` — ranks flagged bets
+- `backtest/` — walk-forward backtest of the game model against past seasons (`run_backtest.py` to run it, `simulate.py` for the simulation logic)
 - `email_report/` — email formatting and delivery
 - `scheduler/` — cron/scheduling setup
 - `docs/` — decisions log and project notes
@@ -75,6 +81,7 @@ This is the harder build and will take real iteration before it's trustworthy wi
 - Run props only: `python main.py --props-only`
 - Run sides/totals only: `python main.py --games-only`
 - Test email without running screener: `python -m email_report.send --test`
+- Backtest the game model against past seasons: `python -m backtest.run_backtest`
 
 ## Conventions
 - Use descriptive variable names — no single-letter variables
@@ -90,7 +97,6 @@ This is the harder build and will take real iteration before it's trustworthy wi
 - This screener produces informational picks only — it never places bets or touches any sportsbook account
 
 ## Current Work Context
-**Status:** Core pipeline built and verified against live data. API keys and Gmail app password are configured in `.env`. Game screener (spreads/totals/moneylines) runs end-to-end against real odds. Player props screener is built but untested against real props data — sportsbooks don't post NFL prop lines this far before the season (props start appearing closer to game week, matching the Wednesday run). Test email delivery confirmed working.
-**Known limitation:** The power-rating model isn't strength-of-schedule adjusted yet — a naive average can make a team look like value against many opponents just because their schedule so far was easy/hard, not because of a real edge. Edge thresholds were empirically recalibrated (see git history) to cut false positives, but the model has NOT been backtested against actual game outcomes, so treat picks as exploratory, not bet-worthy, until that happens.
-**Next step:** Once the season is closer and player props start appearing, verify the props screener end-to-end. Longer-term, consider building a proper opponent-adjusted rating system and backtesting both models against past seasons before trusting them with real money.
-**Phase:** 1 of 2 (Phase 1 = working screener with manual runs — mostly done; Phase 2 = automated email delivery on the Mon/Wed/Fri/Sat schedule — built but not activated, needs a GitHub remote + secrets)
+**Status:** Core pipeline built, verified against live data, and the game model has been backtested against 6 real seasons. API keys and Gmail app password are configured in `.env`. Test email delivery confirmed working. Spread screening now has real backtested evidence of an edge (see above); moneyline is disabled; totals stay on by product decision despite no proven edge. Player props screener is built but untested against real props data — sportsbooks don't post NFL prop lines this far before the season (props start appearing closer to game week, matching the Wednesday run).
+**Next step:** Once the season is closer and player props start appearing, verify the props screener end-to-end. Consider re-backtesting periodically as more of the 2026 season accumulates, since ratings will shift from prior-season data onto current-season data.
+**Phase:** 1 of 2 (Phase 1 = working, backtested screener with manual runs — done for the spread strategy; Phase 2 = automated email delivery on the Mon/Wed/Fri/Sat schedule — built but not activated, needs a GitHub remote + secrets)
