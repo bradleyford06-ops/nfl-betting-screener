@@ -17,9 +17,10 @@ def format_email(results):
 
     games = results.get("games", [])
     props = results.get("props", [])
+    props_speculative = results.get("props_speculative", [])
     props_no_data = results.get("props_no_data", [])
 
-    if not games and not props and not props_no_data:
+    if not games and not props and not props_speculative and not props_no_data:
         lines.append("No bets passed the screening criteria for this run.")
         return "\n".join(lines)
 
@@ -35,6 +36,16 @@ def format_email(results):
         lines.append("=" * 60)
         lines.append("")
         for i, prop in enumerate(props, 1):
+            lines += _format_prop_flag(i, prop)
+
+    if props_speculative:
+        lines.append(f"PLAYER PROPS — SPECULATIVE  ({len(props_speculative)} flagged)")
+        lines.append("Backtesting found weak, noisy signal for these (currently just QB rushing")
+        lines.append("yards) — kept visible so you can watch for a trend as the season goes, but")
+        lines.append("treat these as informational, not a recommendation.")
+        lines.append("=" * 60)
+        lines.append("")
+        for i, prop in enumerate(props_speculative, 1):
             lines += _format_prop_flag(i, prop)
 
     if props_no_data:

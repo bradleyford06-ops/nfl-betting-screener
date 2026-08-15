@@ -20,7 +20,12 @@ Example: a running back averages 60 rushing yards/game, the opposing defense all
 
 **Small samples & rookies:** a player needs at least 1 game of NFL history to get a trend at all, but the required edge scales up sharply for thin samples (a 1-game sample needs ~2.8x the usual gap before it's trusted). True rookie debuts (zero NFL games) can't be trended at all — rather than vanishing silently, they're listed in a separate "no data yet" section of the report so it's clear the model has no opinion on them, not that it missed them.
 
-This has moved a step past "just averages vs. line, easy to eyeball" to fix a real bias, but stays simpler than the game model — still no historical backtest exists for props (no free source of historical player-prop lines), so treat picks as reasoned, not proven.
+**Per-position/stat thresholds (2026-08-15):** a flat 8%/5% edge threshold applied to every stat category ignored that natural volatility varies a lot by position — a synthetic-line backtest (`backtest/run_props_backtest.py`, using each player's own trailing average as a stand-in for a market line, since no free historical prop-line source exists) found RB receiving yards is ~2.6x noisier than WR, and QB rushing yards is ~3.7x noisier than RB rushing. Thresholds are now calibrated per (position, stat) combo — see `POSITION_STAT_THRESHOLDS` in `model/player_trends.py`:
+- WR/RB/TE receiving yards, RB rushing yards, QB passing yards: raised well above the old flat threshold, backed by a 58-62% (71% for QB passing, smaller sample) hit rate against the synthetic backtest
+- **QB rushing yards:** the weakest, noisiest signal tested (54.5% best case) — kept at the original loose threshold so enough picks flow through to watch for a real trend as the season provides live data, but routed to its own "speculative" report section rather than the main list, since Bradley wants to make his own call on these rather than have the model treat them as equally trustworthy
+- Any combo not yet backtested (TDs, completions, attempts, receptions) stays on the original flat 8%/5% guess
+
+This has moved a step past "just averages vs. line, easy to eyeball" to fix real biases, but stays simpler than the game model — the synthetic-line backtest shows the signal has *some* real predictive content, but beating a player's own long-run average is a much lower bar than beating an actual sportsbook line (books already price in most of what a trend captures), so treat picks as reasoned and backtest-informed, not proven the way spreads are.
 
 ### 2. Sides, Totals & Moneylines — Predictive Model
 An opponent-adjusted power-rating model (each team's offense/defense rating accounts for who they actually played, not just raw scoring averages) generates our own predicted spread and total for each game. Flagged when our number disagrees meaningfully with the market's line — the bigger the gap, the higher it ranks.
@@ -74,7 +79,7 @@ This is the harder build and took real iteration before the spread side became t
   - `screener/fetch_odds.py` — pulls odds via The Odds API
   - `screener/pipeline.py` — runs both models, combines results
   - `screener/scoring.py` — ranks flagged bets
-- `backtest/` — walk-forward backtest of the game model against past seasons (`run_backtest.py` to run it, `simulate.py` for the simulation logic)
+- `backtest/` — walk-forward backtests against past seasons: `run_backtest.py`/`simulate.py` for the game model (real historical lines, grades actual ROI), `run_props_backtest.py`/`simulate_props.py` for player props (synthetic line only — see caveat above)
 - `email_report/` — email formatting and delivery
 - `scheduler/` — cron/scheduling setup
 - `docs/` — decisions log and project notes
@@ -87,6 +92,7 @@ This is the harder build and took real iteration before the spread side became t
 - Run sides/totals only: `python main.py --games-only`
 - Test email without running screener: `python -m email_report.send --test`
 - Backtest the game model against past seasons: `python -m backtest.run_backtest`
+- Backtest the props model (synthetic line only): `python -m backtest.run_props_backtest`
 
 ## Conventions
 - Use descriptive variable names — no single-letter variables

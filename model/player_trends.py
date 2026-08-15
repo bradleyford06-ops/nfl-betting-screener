@@ -19,8 +19,29 @@ PROP_STAT_MAP = {
     "player_reception_tds": {"stat_column": "receiving_tds", "positions": ["WR", "TE", "RB"]},
 }
 
-EDGE_THRESHOLD_PCT = 0.08  # player must be trending 8%+ away from the line to matter, at a full 8-game sample
-DEFENSE_THRESHOLD_PCT = 0.05  # defense must allow 5%+ more/less than league average (opponent-adjusted) to confirm
+# Per-(position, stat) edge thresholds, calibrated against a synthetic-line backtest
+# (backtest/run_props_backtest.py, 2019-2024: each player's own trailing average stood in
+# for a market line, since no free source of historical prop lines exists — see CLAUDE.md
+# for what that can and can't prove). A threshold sweep showed the same flat 8%/5% used
+# everywhere before was too loose across the board, and that natural volatility varies a
+# lot by position even for the same stat — e.g. RB receiving yards is ~2.6x noisier than
+# WR, and QB rushing yards is ~3.7x noisier than RB rushing. Combos not listed here haven't
+# been backtested yet and fall back to the original flat guess.
+DEFAULT_THRESHOLDS = {"player": 0.08, "defense": 0.05}
+POSITION_STAT_THRESHOLDS = {
+    ("WR", "receiving_yards"): {"player": 0.20, "defense": 0.08},
+    ("RB", "receiving_yards"): {"player": 0.20, "defense": 0.08},
+    ("TE", "receiving_yards"): {"player": 0.25, "defense": 0.03},
+    ("RB", "rushing_yards"): {"player": 0.12, "defense": 0.08},
+    ("QB", "passing_yards"): {"player": 0.25, "defense": 0.00},
+    # QB rushing showed the weakest, noisiest signal of anything tested (54.5% best-case hit
+    # rate vs. 58-62% elsewhere) — kept at the original flat threshold rather than tightened,
+    # so enough picks flow through to watch for a real trend as the season provides fresh
+    # data, but routed to its own "speculative" section (see SPECULATIVE_COMBOS) rather than
+    # the main list. Bradley wants the information and will make his own call on these.
+    ("QB", "rushing_yards"): {"player": 0.08, "defense": 0.05},
+}
+SPECULATIVE_COMBOS = {("QB", "rushing_yards")}
 
 TEAM_RATING_GAMES_WINDOW = 17  # how many team-games feed the opponent-adjustment (matches the game model)
 TEAM_RATING_ITERATIONS = 15
@@ -84,15 +105,21 @@ def player_adjusted_average(weekly_df, player_name, stat_column, ratings, games_
     return adjusted_values.mean(), len(recent)
 
 
-def required_edge_pct(sample_size):
+def thresholds_for(position, stat_column):
+    """Look up the calibrated (player, defense) edge thresholds for a position/stat combo,
+    falling back to the flat default for anything not yet backtested."""
+    return POSITION_STAT_THRESHOLDS.get((position, stat_column), DEFAULT_THRESHOLDS)
+
+
+def required_edge_pct(sample_size, base_threshold):
     """
     How big a gap between average and line we require before trusting it, scaled up for
-    thinner samples. A full 8-game sample uses the normal threshold; a single game needs
-    roughly 2.8x the usual gap (standard error shrinks with the square root of sample
-    size, so we widen the bar the same way to compensate for the extra noise).
+    thinner samples. A full 8-game sample uses the position/stat's calibrated threshold as-is;
+    a single game needs roughly 2.8x that (standard error shrinks with the square root of
+    sample size, so we widen the bar the same way to compensate for the extra noise).
     """
     effective_games = min(sample_size, FULL_CONFIDENCE_GAMES)
-    return EDGE_THRESHOLD_PCT * (FULL_CONFIDENCE_GAMES / effective_games) ** 0.5
+    return base_threshold * (FULL_CONFIDENCE_GAMES / effective_games) ** 0.5
 
 
 def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, games_window=8, ratings_cache=None):
@@ -139,7 +166,11 @@ def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, 
     if not same_direction:
         return None
 
-    if abs(player_edge_pct) < required_edge_pct(sample_size) or abs(defense_edge_pct) < DEFENSE_THRESHOLD_PCT:
+    combo_thresholds = thresholds_for(position, stat_column)
+    if (
+        abs(player_edge_pct) < required_edge_pct(sample_size, combo_thresholds["player"])
+        or abs(defense_edge_pct) < combo_thresholds["defense"]
+    ):
         return None
 
     side = "Over" if player_edge_pct > 0 else "Under"
@@ -154,6 +185,7 @@ def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, 
         "defense_avg_allowed": round(defense_adjusted_allowed, 1),
         "league_avg_allowed": round(league_avg, 1),
         "edge_score": round(abs(player_edge_pct) + abs(defense_edge_pct), 3),
+        "speculative": (position, stat_column) in SPECULATIVE_COMBOS,
         "explanation": (
             f"{player_name} is averaging {player_avg:.1f} {stat_column.replace('_', ' ')} over "
             f"their last {sample_size} game{'s' if sample_size != 1 else ''} (opponent-adjusted), and "

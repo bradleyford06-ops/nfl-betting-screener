@@ -70,6 +70,17 @@ def send_test_email():
                 "explanation": "Test Player is averaging 62.0 rushing yards over their last 8 games, and SF allows 68.0 per game to RBs (league avg: 55.0) — the 55.5 line looks soft on the over.",
             }
         ],
+        "props_speculative": [
+            {
+                "player": "Test Mobile QB",
+                "market": "player_rush_yds",
+                "side": "Over",
+                "line": 35.5,
+                "opponent": "DAL",
+                "edge_score": 0.10,
+                "explanation": "Test Mobile QB is averaging 42.0 rushing yards over their last 8 games, and DAL allows 46.0 per game to QBs (league avg: 34.0) — the 35.5 line looks soft on the over.",
+            }
+        ],
         "props_no_data": [
             {"player": "Test Rookie", "market": "player_rush_yds", "line": 45.5, "matchup": "SF @ SEA"},
         ],

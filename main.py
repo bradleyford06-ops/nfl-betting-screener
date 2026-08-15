@@ -36,7 +36,7 @@ def main():
     logger.info("Running screener...")
     results = run_screener(props_only=args.props_only, games_only=args.games_only)
 
-    if not results["games"] and not results["props"] and not results["props_no_data"]:
+    if not results["games"] and not results["props"] and not results["props_speculative"] and not results["props_no_data"]:
         logger.warning("No bets passed the screening criteria today.")
         sys.exit(0)
 

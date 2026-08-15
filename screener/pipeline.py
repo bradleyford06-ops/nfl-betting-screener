@@ -80,9 +80,15 @@ def run_props_screener(weekly_df, name_map, games_window=8):
     Players with zero NFL game history (true rookie debuts) can't have a trend computed —
     rather than silently vanishing them, they're collected into a separate "no data yet"
     list so Bradley can see which rookie props exist even though the model has no opinion.
+
+    Some stat/position combos (currently just QB rushing yards) showed weak, noisy signal
+    in backtesting and are marked "speculative" by screen_player_prop — kept live for
+    visibility rather than filtered out, but routed to their own list here so they don't
+    get mixed into the main ranked results at face value.
     """
     events = get_events()
     flags = []
+    speculative_flags = []
     no_data = []
     ratings_cache = {}  # shared across all players in this run so shared position/stat combos aren't recomputed
 
@@ -130,9 +136,9 @@ def run_props_screener(weekly_df, name_map, games_window=8):
 
             flag = screen_player_prop(weekly_df, player_name, market_key, opponent, avg_line, games_window, ratings_cache)
             if flag:
-                flags.append(flag)
+                (speculative_flags if flag["speculative"] else flags).append(flag)
 
-    return rank_props(flags), no_data
+    return rank_props(flags), rank_props(speculative_flags), no_data
 
 
 def run_screener(props_only=False, games_only=False):
@@ -143,6 +149,11 @@ def run_screener(props_only=False, games_only=False):
     name_map = get_team_name_to_abbr()
 
     game_flags = [] if props_only else run_game_screener(schedules_df, name_map)
-    prop_flags, prop_no_data = ([], []) if games_only else run_props_screener(weekly_df, name_map)
+    prop_flags, prop_speculative, prop_no_data = ([], [], []) if games_only else run_props_screener(weekly_df, name_map)
 
-    return {"games": game_flags, "props": prop_flags, "props_no_data": prop_no_data}
+    return {
+        "games": game_flags,
+        "props": prop_flags,
+        "props_speculative": prop_speculative,
+        "props_no_data": prop_no_data,
+    }
