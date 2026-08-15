@@ -25,16 +25,27 @@ Continuing from: first session
 - Also flagged an unresolved model limitation: several teams (MIA, CIN, JAX, ARI) showed up as "value" against many different opponents, a sign the model isn't strength-of-schedule adjusted yet — documented in CLAUDE.md as a known limitation, not fixed this session
 - Fixed a docs bug: the documented `python email_report/send.py --test` command doesn't work (import error) — `python -m email_report.send --test` does; updated CLAUDE.md and main.py's docstring
 - Sent a live test email (with Bradley's explicit go-ahead) — delivered successfully to bradleyford5@hotmail.com
+- Bradley asked "what's next" — presented the choice between backtesting first vs. building schedule-adjustment first vs. leaving the model alone; he chose backtesting first
+- Built `backtest/` (simulate.py + run_backtest.py): a walk-forward simulation using nfl_data_py's historical schedules, which turn out to include closing spread/total/moneyline lines AND the actual historical odds paid on each side — so the backtest grades real ROI, not just prediction accuracy. Ratings for each test game are built only from games before it (no lookahead). Refactored power_ratings.py to split `build_team_games`/`ratings_from_team_games` out of `compute_team_ratings` so the backtest could reuse the rating logic with a per-game cutoff.
+- First backtest (2019-2024, 882 bets) was damning for moneyline: 23.8% win rate, -20.8% ROI. Diagnosed why: 314 of 319 flagged ML bets were underdog picks — the model's win probabilities never got as extreme as the market's on lopsided games because it isn't opponent-adjusted, so it read every heavy favorite as "overpriced." Spread showed a real edge (55.1% win rate, +5.8% ROI, 314 bets); totals were underwater (-11% ROI).
+- Presented these findings to Bradley; he chose to turn off moneyline and build the schedule-adjustment fix (rather than just widening thresholds or shipping spreads-only)
+- Turned off moneyline screening in `screener/pipeline.py` (removed the h2h market fetch and screen_moneyline call), with a comment citing the backtest numbers so a future session understands why
+- Rebuilt the rating system in `model/power_ratings.py`: replaced the naive scoring average with an iterative, opponent-adjusted offense/defense rating (each team's rating is corrected for how tough their actual opponents were, not just raw points scored/allowed) — a simplified Massey-style power rating, ~15 iterations to converge, vectorized with pandas for backtest performance (full 6-season backtest runs in ~35 seconds)
+- Re-ran the backtest with the new model: moneyline win rate roughly doubled (23.8% → 42.1%) confirming the diagnosis was right, but still no clean edge at any threshold. Spread's previous edge disappeared at the *old* threshold (5.0), so instead of trusting that at face value, ran a full threshold sweep (0 to 12+ points) — found a genuine monotonic relationship: win rate climbs from ~50% at low thresholds to 56-60% at edge>=8-10. This is a much stronger, harder-to-fake signal than a single lucky threshold. Raised SPREAD_EDGE_THRESHOLD to 8.0 (156 bets, 56.4% win rate, +9.6% ROI in-sample). Total showed NO edge at any threshold from 0-8 — flat ~49-50% win rate, negative ROI throughout.
+- Asked Bradley what to do about totals given the flat/negative sweep results; he chose to leave totals enabled anyway despite the lack of backtest support — documented clearly in power_ratings.py and CLAUDE.md that this was his explicit call against the data, so totals picks should be treated as unproven/exploratory, not validated
+- Verified the live pipeline still runs correctly end-to-end with the new model (156 spread/total flags on the current preseason slate)
+- Updated CLAUDE.md's "Two Strategies" and "Current Work Context" sections with the backtest results and current model status
 
 ## Pending
 - Confirm with Bradley that the test email actually arrived and reads well
 - Once player props start appearing (closer to the season / Wednesday runs), verify `run_props_screener` end-to-end against real prop lines — untested so far since no props exist yet this early
-- Power-rating model needs strength-of-schedule adjustment (e.g. a proper Massey/Elo-style iterative rating) and a real backtest against past season outcomes before picks should be trusted with money — current thresholds only reduce false positives, they don't prove the model has skill
+- Consider re-backtesting periodically as the 2026 season accumulates real games, since ratings will shift from prior-season data onto current-season data
 - GitHub Actions scheduling (.github/workflows/screener.yml) is scaffolded but inert — needs a GitHub remote + repo secrets (ODDS_API_KEY, GMAIL_ADDRESS, GMAIL_APP_PASSWORD) before it can run automatically; do not push/enable without confirming with Bradley first
 - Known data lag: player prop trend model is currently limited to 2024 season stats until nflverse publishes 2025 weekly data — worth rechecking as the season approaches
+- Totals screener remains enabled despite backtest showing no edge (Bradley's explicit decision) — worth revisiting if he wants to eventually improve or retire it
 
 ## Blockers
-None — core pipeline is verified working end-to-end (except props, which just has no live data to test against yet). Remaining work is model quality (schedule adjustment, backtesting), not plumbing.
+None. Core pipeline verified end-to-end and the game model's spread strategy now has real backtested evidence behind it. Remaining work is props verification (blocked on real prop-line data existing) and Phase 2 automation (blocked on Bradley wanting to activate it).
 
 ## End of Session
 [/session-end will fill this in]
