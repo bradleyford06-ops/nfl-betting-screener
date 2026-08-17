@@ -6,12 +6,17 @@ MARKET_LABELS = {
     "moneyline": "Moneyline",
 }
 
+DASHBOARD_URL = "https://bradleyford06-ops.github.io/nfl-betting-screener/"
+
 
 def format_email(results):
-    """Build the plain-text email body: Sides & Totals section, then Player Props section."""
+    """Build the plain-text email body: Sides & Totals section, then Player Props section.
+    Standouts only — the full interactive dashboard (every week, every pick, season
+    performance) always lives at DASHBOARD_URL, linked at the top and bottom."""
     lines = []
     lines.append("NFL BETTING SCREENER")
     lines.append(f"Report Date: {date.today().strftime('%A, %B %d, %Y')}")
+    lines.append(f"Full dashboard: {DASHBOARD_URL}")
     lines.append("=" * 60)
     lines.append("")
 
@@ -23,6 +28,7 @@ def format_email(results):
 
     if not any([games, props, props_speculative, props_coverage, props_no_data]):
         lines.append("No bets passed the screening criteria for this run.")
+        lines.append(f"Check the dashboard for the full picture: {DASHBOARD_URL}")
         return "\n".join(lines)
 
     if games:
@@ -74,6 +80,7 @@ def format_email(results):
         lines.append("")
 
     lines.append("-" * 60)
+    lines.append(f"Full dashboard (every week, every pick, season performance): {DASHBOARD_URL}")
     lines.append("Generated automatically by the NFL Betting Screener.")
     lines.append("Informational only — not a guarantee. Always bet responsibly.")
 
