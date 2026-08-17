@@ -27,6 +27,13 @@ Example: a running back averages 60 rushing yards/game, the opposing defense all
 
 This has moved a step past "just averages vs. line, easy to eyeball" to fix real biases, but stays simpler than the game model — the synthetic-line backtest shows the signal has *some* real predictive content, but beating a player's own long-run average is a much lower bar than beating an actual sportsbook line (books already price in most of what a trend captures), so treat picks as reasoned and backtest-informed, not proven the way spreads are.
 
+**Coverage model — a second, independent signal for receptions/receiving yards (2026-08-16):** Bradley's own idea, refined through two build attempts. The core insight: how a player performs against zone vs. man coverage is a real, meaningfully different signal (e.g. one real player in testing caught 88% of targets vs. zone but only 65% vs. man) — and it's freely available in nflverse's play-by-play data (`defense_man_zone_type`/`defense_coverage_type`, joinable to plays via `receiver_player_id`), which was a genuine surprise since that level of charting is usually paywalled.
+
+- **First attempt (rejected):** a full bottom-up simulation — estimate team pace, then pass/run split, then defensive coverage mix, then player target share, multiplying all four together before applying the player's coverage-specific efficiency. Backtested at ~51-53% hit rate that got *worse* with bigger edges (46-48%) — the opposite of real signal. Diagnosis: multiplying together several independently-estimated numbers compounds their noise instead of canceling it out. Kept in `model/coverage_sim.py` for reference (`screen_coverage_prop`), not used live.
+- **Simplified version (live):** instead of rebuilding player volume from scratch, use the player's own already-proven opponent-adjusted target trend (same machinery as the main trend model, just applied to the `targets` stat), and apply coverage as a single efficiency modifier on top: `predicted value = player's recent avg targets × [defense zone-rate × player's zone efficiency + (1 - zone-rate) × player's man efficiency]`. Backtested cleanly across all 6 receiving combos (WR/RB/TE × receptions/receiving yards, 2022-2024): hit rate climbs monotonically from ~53-55% up to 57-64% as the edge threshold rises — real signal, on par with or better than the trend model for receptions specifically. `COVERAGE_EDGE_THRESHOLD = 0.20` in `model/coverage_sim.py` balances hit rate against sample size across all six.
+- **Rollout:** runs as a fully separate signal alongside the trend model (Bradley's explicit choice over requiring agreement or replacing the trend model) — own report section, own ranking, not blended. Only covers receptions/receiving yards; rushing and passing props aren't touched by coverage schemes the same way, so the trend model remains the only signal there.
+- **Caveat:** same as the trend model — validated against a synthetic line (player's own trailing average), not a real sportsbook line, since no free historical prop-line source exists. Real market validation has to wait for the season.
+
 ### 2. Sides, Totals & Moneylines — Predictive Model
 An opponent-adjusted power-rating model (each team's offense/defense rating accounts for who they actually played, not just raw scoring averages) generates our own predicted spread and total for each game. Flagged when our number disagrees meaningfully with the market's line — the bigger the gap, the higher it ranks.
 
@@ -40,6 +47,7 @@ This is the harder build and took real iteration before the spread side became t
 ## Tech Stack
 - Language: Python 3 (via Anaconda)
 - Team/Player Stats: `nfl_data_py` (free, pulls from the nflverse/nflfastR data project)
+- Play-by-Play Data: `nfl_data_py`'s play-by-play feed (`screener/fetch_pbp.py`) — includes defensive coverage scheme (man/zone) charting, which powers the coverage model
 - Betting Odds: The Odds API (free tier to start — 500 requests/month; may need to revisit if player-prop coverage burns through the quota)
 - Storage: SQLite (local cache, prevents redundant API calls and preserves history for trend calculations)
 - Email: SMTP via Gmail
@@ -52,6 +60,11 @@ This is the harder build and took real iteration before the spread side became t
 - Opposing defense's opponent-adjusted allowed average in that stat category
 - Flag when the sportsbook line sits meaningfully below (or above, for unders) what both signals support
 - True rookie debuts (zero NFL games) are listed separately as "no data yet," not flagged
+
+**Player Props (coverage model, receptions/receiving yards only):**
+- Player's opponent-adjusted target volume trend, times a blended zone/man efficiency modifier weighted by this week's opponent's actual coverage mix
+- Flag when the resulting predicted value sits 20%+ from the sportsbook line
+- Runs alongside the trend model above, not merged with it — shown in its own report section
 
 **Sides / Totals / Moneylines (power-rating model):**
 - Team power ratings from scoring efficiency, yardage efficiency, turnover margin, and recent form
@@ -71,15 +84,17 @@ This is the harder build and took real iteration before the spread side became t
 
 ## Key Directories
 - `data/` — SQLite cache, raw data files
-- `model/` — the two prediction strategies
+- `model/` — the prediction strategies
   - `model/player_trends.py` — player-vs-defense trend comparison
+  - `model/coverage_sim.py` — coverage (zone/man) model for receptions/receiving yards; the live `screen_simplified_coverage_prop` plus the rejected full-simulation attempt, kept for reference
   - `model/power_ratings.py` — team power-rating predictive model
 - `screener/` — data fetching, orchestration, scoring
   - `screener/fetch_stats.py` — pulls team/player stats via `nfl_data_py`
+  - `screener/fetch_pbp.py` — pulls play-by-play data (coverage scheme, play type) via `nfl_data_py`
   - `screener/fetch_odds.py` — pulls odds via The Odds API
-  - `screener/pipeline.py` — runs both models, combines results
+  - `screener/pipeline.py` — runs all models, combines results
   - `screener/scoring.py` — ranks flagged bets
-- `backtest/` — walk-forward backtests against past seasons: `run_backtest.py`/`simulate.py` for the game model (real historical lines, grades actual ROI), `run_props_backtest.py`/`simulate_props.py` for player props (synthetic line only — see caveat above)
+- `backtest/` — walk-forward backtests against past seasons: `run_backtest.py`/`simulate.py` for the game model (real historical lines, grades actual ROI), `run_props_backtest.py`/`simulate_props.py` for the trend props model, `simulate_coverage_v2.py` for the coverage model (synthetic line only — see caveat above)
 - `email_report/` — email formatting and delivery
 - `scheduler/` — cron/scheduling setup
 - `docs/` — decisions log and project notes
@@ -108,6 +123,6 @@ This is the harder build and took real iteration before the spread side became t
 - This screener produces informational picks only — it never places bets or touches any sportsbook account
 
 ## Current Work Context
-**Status:** Core pipeline built, verified against live data, and the game model has been backtested against 6 real seasons. API keys and Gmail app password are configured in `.env`. Test email delivery confirmed working. Spread screening now has real backtested evidence of an edge (see above); moneyline is disabled; totals stay on by product decision despite no proven edge. Player props screener is built but untested against real props data — sportsbooks don't post NFL prop lines this far before the season (props start appearing closer to game week, matching the Wednesday run).
-**Next step:** Once the season is closer and player props start appearing, verify the props screener end-to-end. Consider re-backtesting periodically as more of the 2026 season accumulates, since ratings will shift from prior-season data onto current-season data.
+**Status:** Core pipeline built, verified against live data, and the game model has been backtested against 6 real seasons. API keys and Gmail app password are configured in `.env`. Test email delivery confirmed working. Spread screening now has real backtested evidence of an edge (see above); moneyline is disabled; totals stay on by product decision despite no proven edge. Player props now run two independent signals (trend model + coverage model) for receptions/receiving yards, plus the trend model alone for other stats — both are built and verified against real historical data, but neither has been tested against real live prop lines yet, since sportsbooks don't post NFL prop lines this far before the season (props start appearing closer to game week, matching the Wednesday run).
+**Next step:** Once the season is closer and player props start appearing, verify both props screeners end-to-end against real lines — this is the single biggest remaining unknown in the whole pipeline. Consider re-backtesting periodically as more of the 2026 season accumulates, since ratings will shift from prior-season data onto current-season data. Also worth backtesting the coverage model's remaining un-tested combos (e.g. TD markets) if there's appetite to extend it further.
 **Phase:** 1 of 2 (Phase 1 = working, backtested screener with manual runs — done for the spread strategy; Phase 2 = automated email delivery on the Mon/Wed/Fri/Sat schedule — built but not activated, needs a GitHub remote + secrets)

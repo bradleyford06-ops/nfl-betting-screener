@@ -1,12 +1,20 @@
 import logging
+import pandas as pd
 from datetime import datetime
 
 from screener.fetch_stats import get_weekly_player_stats, get_schedules
+from screener.fetch_pbp import get_play_by_play
 from screener.fetch_odds import get_events, get_game_odds, get_player_props
 from screener.team_map import get_team_name_to_abbr, to_abbr
 from screener.scoring import rank_props, rank_games
 from model.power_ratings import compute_team_ratings, predict_matchup, screen_spread, screen_total
-from model.player_trends import screen_player_prop, player_current_team, has_nfl_history
+from model.player_trends import (
+    screen_player_prop, player_current_team, has_nfl_history,
+    get_position_stat_ratings, player_adjusted_average,
+)
+from model.coverage_sim import (
+    team_defensive_tendencies, player_coverage_splits, screen_simplified_coverage_prop, COVERAGE_MARKET_MAP,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,19 +149,103 @@ def run_props_screener(weekly_df, name_map, games_window=8):
     return rank_props(flags), rank_props(speculative_flags), no_data
 
 
+def run_coverage_screener(weekly_df, pbp_df, name_map, games_window=8):
+    """
+    Screen receiving props (receptions, receiving yards only — the underlying data is
+    specifically about pass coverage) with the coverage-simulation model: a player's own
+    opponent-adjusted target volume times a zone/man efficiency modifier based on this
+    week's specific opponent's coverage tendency.
+
+    Runs as a second, independent signal alongside the trend model (run_props_screener) —
+    backtested separately (backtest/simulate_coverage_v2.py) and validated on its own
+    terms, not blended with or required to agree with the trend model's picks. Bradley
+    chose to see both signals separately rather than merge them, so results land in their
+    own report section rather than the main props list.
+    """
+    events = get_events()
+    flags = []
+    target_ratings_cache = {}
+    def_tendencies = team_defensive_tendencies(pbp_df)
+
+    for event in events:
+        home_full, away_full = event["home_team"], event["away_team"]
+        home_abbr, away_abbr = to_abbr(home_full, name_map), to_abbr(away_full, name_map)
+
+        try:
+            props = get_player_props(event["id"])  # same default markets as run_props_screener — cache hit, no extra API cost
+        except Exception as e:
+            logger.warning(f"Failed to fetch props for {away_full} @ {home_full}: {e}")
+            continue
+
+        lines_by_player_market = {}
+        for bookmaker in props.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                market_key = market["key"]
+                if market_key not in COVERAGE_MARKET_MAP:
+                    continue
+                for outcome in market["outcomes"]:
+                    if outcome["name"] != "Over":
+                        continue
+                    player_name = outcome["description"]
+                    lines_by_player_market.setdefault((market_key, player_name), []).append(outcome["point"])
+
+        for (market_key, player_name), lines in lines_by_player_market.items():
+            avg_line = sum(lines) / len(lines)
+
+            player_rows = weekly_df[weekly_df["player_display_name"] == player_name]
+            if player_rows.empty:
+                continue  # no history — already surfaced by the trend model's "no data yet" list
+            player_id = player_rows["player_id"].iloc[-1]
+            position = player_rows["position"].iloc[-1]
+
+            player_team = player_current_team(weekly_df, player_name)
+            if player_team == home_abbr:
+                opponent = away_abbr
+            elif player_team == away_abbr:
+                opponent = home_abbr
+            else:
+                continue
+
+            target_ratings = get_position_stat_ratings(weekly_df, position, "targets", target_ratings_cache)
+            player_avg_targets, _ = player_adjusted_average(weekly_df, player_name, "targets", target_ratings, games_window)
+            if player_avg_targets is None:
+                continue
+
+            opponent_row = def_tendencies[def_tendencies["team"] == opponent]
+            if opponent_row.empty:
+                continue
+            zone_rate = opponent_row["avg_zone_rate"].iloc[0]
+            if pd.isna(zone_rate):
+                continue
+
+            coverage_splits = player_coverage_splits(pbp_df, player_id)
+            flag = screen_simplified_coverage_prop(player_name, market_key, opponent, player_avg_targets, zone_rate, coverage_splits, avg_line)
+            if flag:
+                flags.append(flag)
+
+    return rank_props(flags)
+
+
 def run_screener(props_only=False, games_only=False):
-    """Run the full NFL betting screener: fetch data, run both models, return ranked results."""
+    """Run the full NFL betting screener: fetch data, run all models, return ranked results."""
     years = get_stats_years()
     weekly_df = get_weekly_player_stats(years)
     schedules_df = get_schedules(years)
     name_map = get_team_name_to_abbr()
 
     game_flags = [] if props_only else run_game_screener(schedules_df, name_map)
-    prop_flags, prop_speculative, prop_no_data = ([], [], []) if games_only else run_props_screener(weekly_df, name_map)
+
+    if games_only:
+        prop_flags, prop_speculative, prop_no_data, prop_coverage = [], [], [], []
+    else:
+        prop_flags, prop_speculative, prop_no_data = run_props_screener(weekly_df, name_map)
+        pbp_df = get_play_by_play(years)
+        prop_coverage = run_coverage_screener(weekly_df, pbp_df, name_map)
 
     return {
         "games": game_flags,
         "props": prop_flags,
         "props_speculative": prop_speculative,
+        "props_coverage": prop_coverage,
         "props_no_data": prop_no_data,
     }

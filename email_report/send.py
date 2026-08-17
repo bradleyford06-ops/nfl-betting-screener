@@ -81,6 +81,21 @@ def send_test_email():
                 "explanation": "Test Mobile QB is averaging 42.0 rushing yards over their last 8 games, and DAL allows 46.0 per game to QBs (league avg: 34.0) — the 35.5 line looks soft on the over.",
             }
         ],
+        "props_coverage": [
+            {
+                "player": "Test Slot WR",
+                "market": "player_reception_yds",
+                "side": "Over",
+                "line": 45.5,
+                "opponent": "GB",
+                "predicted_value": 58.3,
+                "edge_score": 0.28,
+                "zone_sample_size": 62,
+                "man_sample_size": 41,
+                "small_sample": False,
+                "explanation": "Test Slot WR's recent target volume (7.2/game, opponent-adjusted) blended with their zone/man efficiency split against this week's 67% zone-coverage opponent predicts 58.3 receiving yards vs a 45.5 line — favors the over.",
+            }
+        ],
         "props_no_data": [
             {"player": "Test Rookie", "market": "player_rush_yds", "line": 45.5, "matchup": "SF @ SEA"},
         ],
