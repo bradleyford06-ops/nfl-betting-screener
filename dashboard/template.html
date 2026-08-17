@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NFL Betting Screener</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #161d2e;
+    --panel-alt: #1d2538;
+    --border: #2a3348;
+    --text: #e8ecf4;
+    --text-dim: #8b96ac;
+    --accent: #5b9dff;
+    --green: #3ecf8e;
+    --red: #ff6b6b;
+    --amber: #f5b642;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  header h1 { margin: 0; font-size: 1.3rem; }
+  header .generated { color: var(--text-dim); font-size: 0.85rem; }
+  nav.tabs {
+    display: flex;
+    gap: 4px;
+    padding: 12px 24px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  nav.tabs button {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    padding: 10px 16px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  nav.tabs button.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  main { padding: 20px 24px 60px; max-width: 1100px; margin: 0 auto; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+    align-items: center;
+  }
+  .controls select, .controls input {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 0.88rem;
+  }
+  .controls label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+  .week-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .week-pills button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .week-pills button.active {
+    background: var(--accent);
+    color: #08101f;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .game-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .game-card-header {
+    padding: 14px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+  }
+  .game-card-header:hover { background: var(--panel-alt); }
+  .game-matchup { font-weight: 600; font-size: 1rem; }
+  .game-meta { color: var(--text-dim); font-size: 0.82rem; margin-top: 2px; }
+  .badge-row { display: flex; gap: 6px; align-items: center; }
+  .badge {
+    font-size: 0.78rem;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--panel-alt);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .badge.edge-high { background: rgba(62,207,142,0.15); color: var(--green); border-color: rgba(62,207,142,0.3); }
+  .badge.edge-med { background: rgba(245,182,66,0.15); color: var(--amber); border-color: rgba(245,182,66,0.3); }
+  .chevron { color: var(--text-dim); transition: transform 0.15s; }
+  .game-card.open .chevron { transform: rotate(90deg); }
+  .game-card-body { display: none; padding: 0 16px 16px; }
+  .game-card.open .game-card-body { display: block; }
+
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; min-width: 480px; border-collapse: collapse; font-size: 0.88rem; }
+  th {
+    text-align: left;
+    color: var(--text-dim);
+    font-weight: 500;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  th:hover { color: var(--text); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .side-pill { font-weight: 600; }
+  .side-Over, .side-pill.over { color: var(--green); }
+  .side-Under, .side-pill.under { color: var(--red); }
+  .explanation { color: var(--text-dim); font-size: 0.82rem; margin-top: 2px; }
+  .small-sample-flag { color: var(--amber); font-size: 0.78rem; }
+  .source-tag {
+    font-size: 0.72rem;
+    padding: 2px 7px;
+    border-radius: 5px;
+    background: var(--panel-alt);
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .subhead { color: var(--text-dim); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; margin: 14px 0 6px; }
+  .no-data-list { color: var(--text-dim); font-size: 0.85rem; }
+  .no-data-list div { padding: 4px 0; }
+
+  .perf-cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+  .perf-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    min-width: 160px;
+    flex: 1;
+  }
+  .perf-card .label { color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .perf-card .value { font-size: 1.6rem; font-weight: 700; margin-top: 4px; }
+  .perf-card .sub { color: var(--text-dim); font-size: 0.82rem; margin-top: 2px; }
+  .roi-positive { color: var(--green); }
+  .roi-negative { color: var(--red); }
+
+  .empty-state { color: var(--text-dim); text-align: center; padding: 60px 20px; }
+  .status-won { color: var(--green); }
+  .status-lost { color: var(--red); }
+  .status-push { color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>NFL Betting Screener</h1>
+  <div class="generated" id="generated-at"></div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="upcoming">Upcoming Picks</button>
+  <button class="tab-btn" data-tab="season">Season Performance</button>
+</nav>
+
+<main>
+  <div class="view active" id="view-upcoming">
+    <div class="week-pills" id="week-pills"></div>
+    <div class="controls">
+      <label>Stat: <select id="filter-market"><option value="">All</option></select></label>
+      <label>Source: <select id="filter-source">
+        <option value="">All</option>
+        <option value="games">Sides & Totals</option>
+        <option value="props">Trend model</option>
+        <option value="props_speculative">Trend model (speculative)</option>
+        <option value="props_coverage">Coverage model</option>
+      </select></label>
+      <label><input type="checkbox" id="filter-hide-small"> Hide small-sample props</label>
+    </div>
+    <div id="games-container"></div>
+  </div>
+
+  <div class="view" id="view-season">
+    <div class="perf-cards" id="perf-cards"></div>
+    <div class="subhead">Recent results</div>
+    <div class="table-scroll">
+      <table id="recent-picks-table">
+        <thead><tr><th>Week</th><th>Subject</th><th>Market</th><th>Side</th><th>Line</th><th>Result</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+const DATA = __DASHBOARD_DATA__;
+
+document.getElementById("generated-at").textContent = "Updated " + new Date(DATA.generated_at).toLocaleString();
+
+// ---------- Tabs ----------
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("view-" + btn.dataset.tab).classList.add("active");
+  });
+});
+
+// ---------- Upcoming Picks ----------
+let currentWeekIndex = 0;
+
+function edgeBadgeClass(edge, isProp) {
+  const threshold = isProp ? 0.25 : 8;
+  const midThreshold = isProp ? 0.15 : 5;
+  if (edge >= threshold) return "edge-high";
+  if (edge >= midThreshold) return "edge-med";
+  return "";
+}
+
+function populateMarketFilter() {
+  const markets = new Set();
+  DATA.weeks.forEach(w => w.games.forEach(g => {
+    g.game_flags.forEach(f => markets.add(f.market));
+    g.props.forEach(p => markets.add(p.market));
+  }));
+  const select = document.getElementById("filter-market");
+  [...markets].sort().forEach(m => {
+    const opt = document.createElement("option");
+    opt.value = m;
+    opt.textContent = m;
+    select.appendChild(opt);
+  });
+}
+
+function renderWeekPills() {
+  const container = document.getElementById("week-pills");
+  container.innerHTML = "";
+  DATA.weeks.forEach((w, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = `Week ${w.week}`;
+    if (i === currentWeekIndex) btn.classList.add("active");
+    btn.addEventListener("click", () => { currentWeekIndex = i; renderWeekPills(); renderGames(); });
+    container.appendChild(btn);
+  });
+}
+
+function renderGames() {
+  const container = document.getElementById("games-container");
+  container.innerHTML = "";
+  const week = DATA.weeks[currentWeekIndex];
+  if (!week) {
+    container.innerHTML = '<div class="empty-state">No picks flagged right now.</div>';
+    return;
+  }
+
+  const marketFilter = document.getElementById("filter-market").value;
+  const sourceFilter = document.getElementById("filter-source").value;
+  const hideSmall = document.getElementById("filter-hide-small").checked;
+
+  let anyRendered = false;
+
+  week.games.forEach(game => {
+    let gameFlags = game.game_flags.filter(f =>
+      (!marketFilter || f.market === marketFilter) &&
+      (!sourceFilter || sourceFilter === "games")
+    );
+    let props = game.props.filter(p =>
+      (!marketFilter || p.market === marketFilter) &&
+      (!sourceFilter || sourceFilter === p.source) &&
+      (!hideSmall || !p.small_sample)
+    );
+
+    if (gameFlags.length === 0 && props.length === 0) return;
+    anyRendered = true;
+
+    const card = document.createElement("div");
+    card.className = "game-card";
+
+    const header = document.createElement("div");
+    header.className = "game-card-header";
+    header.innerHTML = `
+      <div>
+        <div class="game-matchup">${game.matchup}</div>
+        <div class="game-meta">${gameFlags.length} side/total pick${gameFlags.length===1?"":"s"}, ${props.length} prop${props.length===1?"":"s"}</div>
+      </div>
+      <div class="badge-row">
+        <span class="badge ${edgeBadgeClass(game.max_edge, game.max_edge < 3)}">top edge ${game.max_edge.toFixed(2)}</span>
+        <span class="chevron">&#9656;</span>
+      </div>`;
+    header.addEventListener("click", () => card.classList.toggle("open"));
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "game-card-body";
+
+    if (gameFlags.length) {
+      const sub = document.createElement("div");
+      sub.className = "subhead";
+      sub.textContent = "Sides & Totals";
+      body.appendChild(sub);
+      body.appendChild(renderGameFlagsTable(gameFlags));
+    }
+    if (props.length) {
+      const sub = document.createElement("div");
+      sub.className = "subhead";
+      sub.textContent = "Player Props";
+      body.appendChild(sub);
+      body.appendChild(renderPropsTable(props));
+    }
+    card.appendChild(body);
+    container.appendChild(card);
+  });
+
+  if (week.no_data && week.no_data.length && !marketFilter && !sourceFilter) {
+    anyRendered = true;
+    const sub = document.createElement("div");
+    sub.className = "subhead";
+    sub.textContent = `No data yet (${week.no_data.length} rookies)`;
+    container.appendChild(sub);
+    const list = document.createElement("div");
+    list.className = "no-data-list";
+    week.no_data.forEach(nd => {
+      const row = document.createElement("div");
+      row.textContent = `${nd.player} — ${nd.market} ${nd.line} (${nd.matchup})`;
+      list.appendChild(row);
+    });
+    container.appendChild(list);
+  }
+
+  if (!anyRendered) {
+    container.innerHTML = '<div class="empty-state">No picks match the current filters.</div>';
+  }
+}
+
+function renderGameFlagsTable(flags) {
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>Market</th><th>Side</th><th>Line</th><th>Edge</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  flags.forEach(f => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${f.market_label}</td>
+      <td><span class="side-pill">${f.side}</span></td>
+      <td>${f.line != null ? f.line.toFixed(1) : "-"}${f.price ? " (" + Math.round(f.price) + ")" : ""}</td>
+      <td>${f.edge_score.toFixed(2)}</td>`;
+    const expl = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "explanation";
+    td.textContent = f.explanation;
+    expl.appendChild(td);
+    tbody.appendChild(tr);
+    tbody.appendChild(expl);
+  });
+  table.appendChild(tbody);
+  const wrap = document.createElement("div");
+  wrap.className = "table-scroll";
+  wrap.appendChild(table);
+  return wrap;
+}
+
+function renderPropsTable(props) {
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th data-sort='edge_score'>Player</th><th>Market</th><th>Side</th><th>Line</th><th data-sort='edge_score'>Edge</th><th>Source</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+
+  function renderRows(sorted) {
+    tbody.innerHTML = "";
+    sorted.forEach(p => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${p.player}</td>
+        <td>${p.market}</td>
+        <td><span class="side-pill side-${p.side}">${p.side}</span></td>
+        <td>${p.line != null ? p.line : "-"}${p.price ? " (" + Math.round(p.price) + ")" : ""}</td>
+        <td>${p.edge_score.toFixed(3)}${p.small_sample ? ' <span class="small-sample-flag">&#9888;</span>' : ""}</td>
+        <td><span class="source-tag">${p.source_label}</span></td>`;
+      const expl = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 6;
+      td.className = "explanation";
+      td.textContent = p.explanation;
+      expl.appendChild(td);
+      tbody.appendChild(tr);
+      tbody.appendChild(expl);
+    });
+  }
+
+  renderRows([...props].sort((a, b) => b.edge_score - a.edge_score));
+  table.querySelectorAll("th[data-sort]").forEach(th => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      const asc = th.dataset.asc === "true";
+      th.dataset.asc = (!asc).toString();
+      renderRows([...props].sort((a, b) => asc ? a[key] - b[key] : b[key] - a[key]));
+    });
+  });
+
+  table.appendChild(tbody);
+  const wrap = document.createElement("div");
+  wrap.className = "table-scroll";
+  wrap.appendChild(table);
+  return wrap;
+}
+
+["filter-market", "filter-source", "filter-hide-small"].forEach(id => {
+  document.getElementById(id).addEventListener("change", renderGames);
+});
+
+// ---------- Season Performance ----------
+function renderSeasonPerformance() {
+  const cardsContainer = document.getElementById("perf-cards");
+  cardsContainer.innerHTML = "";
+  const perf = DATA.season_performance;
+
+  if (!perf || !perf.overall) {
+    cardsContainer.innerHTML = '<div class="empty-state">No reconciled results yet — check back once games have been played.</div>';
+    return;
+  }
+
+  function card(label, value, sub, roiClass) {
+    const div = document.createElement("div");
+    div.className = "perf-card";
+    div.innerHTML = `<div class="label">${label}</div><div class="value ${roiClass||''}">${value}</div><div class="sub">${sub||''}</div>`;
+    return div;
+  }
+
+  const o = perf.overall;
+  cardsContainer.appendChild(card("Overall Record", `${o.wins}-${o.losses}`, `${(o.win_rate*100).toFixed(1)}% win rate`));
+  cardsContainer.appendChild(card("Overall ROI", `${o.roi_pct >= 0 ? "+" : ""}${o.roi_pct}%`, `${o.bets} bet${o.bets === 1 ? "" : "s"}`, o.roi_pct >= 0 ? "roi-positive" : "roi-negative"));
+
+  Object.entries(perf.by_strategy || {}).forEach(([strategy, s]) => {
+    cardsContainer.appendChild(card(strategy, `${s.wins}-${s.losses}`, `${(s.win_rate*100).toFixed(1)}% | ROI ${s.roi_pct >= 0 ? "+" : ""}${s.roi_pct}%`, s.roi_pct >= 0 ? "roi-positive" : "roi-negative"));
+  });
+
+  const tbody = document.querySelector("#recent-picks-table tbody");
+  tbody.innerHTML = "";
+  [...(DATA.recent_picks || [])].reverse().forEach(p => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${p.season} W${p.week}</td>
+      <td>${p.subject}</td>
+      <td>${p.market}</td>
+      <td>${p.side}</td>
+      <td>${p.line != null ? p.line : "-"}</td>
+      <td class="status-${p.status}">${p.status}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// ---------- Init ----------
+populateMarketFilter();
+renderWeekPills();
+renderGames();
+renderSeasonPerformance();
+</script>
+
+</body>
+</html>

@@ -263,7 +263,7 @@ def screen_coverage_prop(player_name, market_key, matchup_sim, target_share, cov
         "player": player_name,
         "market": market_key,
         "side": side,
-        "line": line,
+        "line": round(line, 1),
         "predicted_value": round(predicted_value, 1),
         "edge_score": round(abs(edge_pct), 3),
         "zone_sample_size": prediction["zone_sample_size"],
@@ -272,7 +272,7 @@ def screen_coverage_prop(player_name, market_key, matchup_sim, target_share, cov
         "explanation": (
             f"Coverage simulation predicts {predicted_value:.1f} {stat_column.replace('_', ' ')} "
             f"({prediction['predicted_targets_vs_zone']:.1f} targets vs zone, "
-            f"{prediction['predicted_targets_vs_man']:.1f} vs man) against a {line} line — "
+            f"{prediction['predicted_targets_vs_man']:.1f} vs man) against a {line:.1f} line — "
             f"{'built on a thin sample (' + str(min_sample) + ' targets in the smaller bucket), worth double-checking. ' if small_sample else ''}"
             f"favors the {side.lower()}."
         ),
@@ -341,7 +341,7 @@ def screen_simplified_coverage_prop(player_name, market_key, opponent_team, play
         "player": player_name,
         "market": market_key,
         "side": side,
-        "line": line,
+        "line": round(line, 1),
         "opponent": opponent_team,
         "predicted_value": round(predicted_value, 1),
         "edge_score": round(abs(edge_pct), 3),
@@ -351,7 +351,7 @@ def screen_simplified_coverage_prop(player_name, market_key, opponent_team, play
         "explanation": (
             f"{player_name}'s recent target volume ({player_avg_targets:.1f}/game, opponent-adjusted) "
             f"blended with their zone/man efficiency split against this week's {defense_zone_rate*100:.0f}% "
-            f"zone-coverage opponent predicts {predicted_value:.1f} {stat_column.replace('_', ' ')} vs a {line} line — "
+            f"zone-coverage opponent predicts {predicted_value:.1f} {stat_column.replace('_', ' ')} vs a {line:.1f} line — "
             f"{'built on a thin sample (' + str(min_sample) + ' targets in the smaller bucket), worth double-checking. ' if small_sample else ''}"
             f"favors the {side.lower()}."
         ),

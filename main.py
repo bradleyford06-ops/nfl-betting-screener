@@ -6,6 +6,10 @@ Run: python main.py --send         — screen and send email to bradleyford5@hot
 Run: python main.py --props-only   — only screen player props
 Run: python main.py --games-only   — only screen spreads/totals/moneylines
 Run: python -m email_report.send --test — send a test email without running the screener
+
+The dashboard (docs/index.html) is only regenerated on full runs (not --props-only/
+--games-only), since a partial run's results would otherwise blow away whatever the other
+half of the dashboard was showing.
 """
 
 import argparse
@@ -43,6 +47,16 @@ def main():
     results = run_screener(props_only=args.props_only, games_only=args.games_only)
 
     log_results_to_ledger(results)
+
+    if not args.props_only and not args.games_only:
+        from screener.reconcile import summarize_season
+        from screener.ledger import get_all_picks
+        from dashboard.build_data import build_dashboard_data
+        from dashboard.generate import write_dashboard
+
+        logger.info("Generating dashboard...")
+        dashboard_data = build_dashboard_data(results, summarize_season(), get_all_picks())
+        write_dashboard(dashboard_data, "docs/index.html")
 
     if not any(results[k] for k in ["games", "props", "props_speculative", "props_coverage", "props_no_data"]):
         logger.warning("No bets passed the screening criteria today.")

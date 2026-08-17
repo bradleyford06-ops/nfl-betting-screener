@@ -157,7 +157,7 @@ def screen_spread(prediction, market_spread_home):
     return {
         "market": "spread",
         "side": side,
-        "market_line": market_spread_home,
+        "market_line": round(market_spread_home, 1),
         "predicted_spread": prediction["predicted_spread"],
         "edge_score": round(abs(edge), 1),
         "explanation": (
@@ -178,12 +178,12 @@ def screen_total(prediction, market_total):
     return {
         "market": "total",
         "side": side,
-        "market_line": market_total,
+        "market_line": round(market_total, 1),
         "predicted_total": prediction["predicted_total"],
         "edge_score": round(abs(edge), 1),
         "explanation": (
             f"Model predicts a total of {prediction['predicted_total']} points "
-            f"vs. a market total of {market_total} — {abs(edge):.1f} points of disagreement favors the {side.lower()}."
+            f"vs. a market total of {market_total:.1f} — {abs(edge):.1f} points of disagreement favors the {side.lower()}."
         ),
     }
 

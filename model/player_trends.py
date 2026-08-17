@@ -178,7 +178,7 @@ def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, 
         "player": player_name,
         "market": market_key,
         "side": side,
-        "line": line,
+        "line": round(line, 1),
         "player_recent_avg": round(player_avg, 1),
         "sample_size": sample_size,
         "opponent": opponent_team,
@@ -190,7 +190,7 @@ def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, 
             f"{player_name} is averaging {player_avg:.1f} {stat_column.replace('_', ' ')} over "
             f"their last {sample_size} game{'s' if sample_size != 1 else ''} (opponent-adjusted), and "
             f"{opponent_team} allows {defense_adjusted_allowed:.1f} per game to {position}s once "
-            f"adjusted for schedule (league avg: {league_avg:.1f}) — the {line} line looks "
+            f"adjusted for schedule (league avg: {league_avg:.1f}) — the {line:.1f} line looks "
             f"soft on the {side.lower()}."
         ),
     }
