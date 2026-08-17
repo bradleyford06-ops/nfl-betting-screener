@@ -1,7 +1,11 @@
 # NFL Betting Screener
 
 ## What This Project Does
-Screens NFL betting markets for value opportunities using two separate strategies, and delivers a ranked pick list by email on Monday, Wednesday, Friday, and Saturday.
+Screens NFL betting markets for value opportunities using two separate strategies. Runs automatically once a day via GitHub Actions: emails standout picks and publishes a full interactive dashboard.
+
+- **Live dashboard:** https://bradleyford06-ops.github.io/nfl-betting-screener/ — browse every upcoming week, drill into any game to see its props, filter by stat/source, sorted by edge; plus a season performance tab (win rate/ROI per strategy, reconciled automatically as games complete).
+- **GitHub repo:** https://github.com/bradleyford06-ops/nfl-betting-screener (public — the repo needs to be public for free GitHub Pages hosting; Bradley made this call explicitly knowing the tradeoff against a paid private-Pages plan)
+- **Email:** still goes out on every run too, for standouts — see Email Delivery below.
 
 ## Vision & Product Lead
 Bradley Ford — makes all betting-logic and product decisions. Not a developer.
@@ -48,10 +52,11 @@ This is the harder build and took real iteration before the spread side became t
 - Language: Python 3 (via Anaconda)
 - Team/Player Stats: `nfl_data_py` (free, pulls from the nflverse/nflfastR data project)
 - Play-by-Play Data: `nfl_data_py`'s play-by-play feed (`screener/fetch_pbp.py`) — includes defensive coverage scheme (man/zone) charting, which powers the coverage model
-- Betting Odds: The Odds API (free tier to start — 500 requests/month; may need to revisit if player-prop coverage burns through the quota)
-- Storage: SQLite (local cache, prevents redundant API calls and preserves history for trend calculations)
+- Betting Odds: The Odds API. **Bet365 is not available through this provider** (confirmed live against every region it supports — us, us2, uk, eu — Bet365 has essentially no US market presence) — Bradley chose to keep the existing cross-book average (DraftKings, FanDuel, BetMGM, BetRivers, Bovada, ESPN Bet, Hard Rock Bet, BetUS, Bally Bet, betPARX, BetOnline.ag, MyBookie.ag) rather than pin to one book or switch providers. **Free tier (500 credits/month) is too small now that the screener runs daily and player props cost one call per game** — Bradley agreed to upgrade to the $30/month/20,000-credit tier; this is a manual step only he can do (needs his payment details) and hadn't been confirmed done as of 2026-08-16.
+- Storage: SQLite — `data/cache.db` (TTL cache, gitignored, rebuilt as needed) and `data/ledger.db` (permanent picks ledger, deliberately NOT gitignored — see below)
 - Email: SMTP via Gmail
-- Scheduling: Cron job or Claude scheduled task
+- Scheduling: GitHub Actions (`.github/workflows/screener.yml`), daily at 13:00 UTC (9AM ET). Requires repo secrets `ODDS_API_KEY`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD` (already set on the GitHub repo as of 2026-08-16)
+- Dashboard hosting: GitHub Pages, serving `/docs` on the `main` branch (enabled 2026-08-16)
 
 ## Screening Criteria
 
@@ -73,17 +78,12 @@ This is the harder build and took real iteration before the spread side became t
 
 ## Email Delivery
 - **To:** bradleyford5@hotmail.com
-- **Schedule:**
-  - **Monday** — odds open for the upcoming week (sides, totals, moneylines)
-  - **Wednesday** — player prop lines typically appear; run again
-  - **Friday** — re-run as lines move
-  - **Saturday** — re-run closer to Sunday's slate
-- **Format:** Ranked pick list, split by strategy (Player Props / Sides & Totals)
+- **Schedule:** Daily at 13:00 UTC (9AM ET) via GitHub Actions (`.github/workflows/screener.yml`) — changed 2026-08-16 from the original Mon/Wed/Fri/Sat plan, since odds shift throughout the week and Bradley wants to check the dashboard for updates any day
+- **Format:** Ranked pick list, split by strategy (Player Props: trend / speculative / coverage — Sides & Totals). Every email links the live dashboard at top and bottom, including on a "no picks" run
   - Each pick: plain-English explanation of why it was flagged
-  - Delta section: new picks since last report, picks that dropped off or lines that moved against us
 
 ## Key Directories
-- `data/` — SQLite cache, raw data files
+- `data/` — `cache.db` (TTL cache, gitignored) and `ledger.db` (permanent picks ledger, tracked in git — see below)
 - `model/` — the prediction strategies
   - `model/player_trends.py` — player-vs-defense trend comparison
   - `model/coverage_sim.py` — coverage (zone/man) model for receptions/receiving yards; the live `screen_simplified_coverage_prop` plus the rejected full-simulation attempt, kept for reference
@@ -94,10 +94,13 @@ This is the harder build and took real iteration before the spread side became t
   - `screener/fetch_odds.py` — pulls odds via The Odds API
   - `screener/pipeline.py` — runs all models, combines results
   - `screener/scoring.py` — ranks flagged bets
+  - `screener/ledger.py` — permanent SQLite store of every pick ever flagged, upserted per (strategy, season, week, subject, market)
+  - `screener/reconcile.py` — grades open ledger picks against real results (schedules_df for games, weekly_df for props) once available; reuses the same win/push/loss logic proven in the backtests
+- `dashboard/` — generates the interactive dashboard: `build_data.py` shapes results + ledger into the JSON payload, `template.html` + `generate.py` render the self-contained HTML page (no build step, no external dependencies)
+- `docs/` — **not** decision notes — this is the GitHub Pages output folder (`index.html` is the live dashboard, regenerated by every full `main.py` run and committed back by the Actions workflow)
 - `backtest/` — walk-forward backtests against past seasons: `run_backtest.py`/`simulate.py` for the game model (real historical lines, grades actual ROI), `run_props_backtest.py`/`simulate_props.py` for the trend props model, `simulate_coverage_v2.py` for the coverage model (synthetic line only — see caveat above)
 - `email_report/` — email formatting and delivery
-- `scheduler/` — cron/scheduling setup
-- `docs/` — decisions log and project notes
+- `scheduler/` — unused now that GitHub Actions handles scheduling; kept empty in case that ever changes
 - `.claude/memory/sessions/` — session history
 
 ## Commands
@@ -116,13 +119,15 @@ This is the harder build and took real iteration before the spread side became t
 - Never hardcode API keys — always use environment variables or a `.env` file
 
 ## Hard Rules
-- NEVER commit `.env` files or API keys to git
+- NEVER commit `.env` files or API keys to git — secrets live in GitHub repo secrets for the Actions workflow, and local `.env` for manual runs
 - NEVER send email to any address other than bradleyford5@hotmail.com without explicit approval
 - NEVER delete cached data without confirming with Bradley first
 - ALWAYS test email formatting before enabling scheduled sends
 - This screener produces informational picks only — it never places bets or touches any sportsbook account
+- The GitHub repo is public (needed for free Pages hosting) — don't commit anything sensitive beyond what's already there; `.env` is gitignored and was never committed
 
 ## Current Work Context
-**Status:** Core pipeline built, verified against live data, and the game model has been backtested against 6 real seasons. API keys and Gmail app password are configured in `.env`. Test email delivery confirmed working. Spread screening now has real backtested evidence of an edge (see above); moneyline is disabled; totals stay on by product decision despite no proven edge. Player props now run two independent signals (trend model + coverage model) for receptions/receiving yards, plus the trend model alone for other stats — both are built and verified against real historical data, but neither has been tested against real live prop lines yet, since sportsbooks don't post NFL prop lines this far before the season (props start appearing closer to game week, matching the Wednesday run).
-**Next step:** Once the season is closer and player props start appearing, verify both props screeners end-to-end against real lines — this is the single biggest remaining unknown in the whole pipeline. Consider re-backtesting periodically as more of the 2026 season accumulates, since ratings will shift from prior-season data onto current-season data. Also worth backtesting the coverage model's remaining un-tested combos (e.g. TD markets) if there's appetite to extend it further.
-**Phase:** 1 of 2 (Phase 1 = working, backtested screener with manual runs — done for the spread strategy; Phase 2 = automated email delivery on the Mon/Wed/Fri/Sat schedule — built but not activated, needs a GitHub remote + secrets)
+**Status:** Fully automated and live as of 2026-08-16. Runs daily via GitHub Actions (repo: bradleyford06-ops/nfl-betting-screener), emails standouts to bradleyford5@hotmail.com, and publishes an interactive dashboard to GitHub Pages (https://bradleyford06-ops.github.io/nfl-betting-screener/) — every week browsable, drill into any game for its props, season performance tracked via a permanent ledger that auto-reconciles against real results. Verified end-to-end with a real manually-triggered Actions run: screener ran, email sent, dashboard + ledger committed back successfully. Spread screening has real backtested evidence of an edge; moneyline is disabled; totals stay on by product decision despite no proven edge. Player props run two independent signals (trend + coverage) for receptions/receiving yards, trend-only for other stats — both verified against real historical data, but neither tested against real live prop lines yet, since sportsbooks don't post NFL prop lines this far before the season.
+**Outstanding, not on us:** Bradley needs to upgrade the Odds API plan himself (payment details required) — the free 500-credit/month tier is too small for daily runs plus per-game player-prop calls. Not yet confirmed done as of 2026-08-16; check this early in a future session, since if it's still on the free tier the daily Action may start failing or returning incomplete odds once real props start posting and volume increases.
+**Next step:** Once the season is closer and player props start appearing, verify both props screeners end-to-end against real lines — this is the single biggest remaining unknown in the whole pipeline. Consider re-backtesting periodically as more of the 2026 season accumulates. Also worth backtesting the coverage model's remaining un-tested combos (e.g. TD markets) if there's appetite to extend it further.
+**Phase:** 2 of 2 — both phases now done. Phase 1 (working, backtested screener) and Phase 2 (automated daily delivery + dashboard) are both live. Remaining work is validation against real season data as it accumulates, not new infrastructure.
