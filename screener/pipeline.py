@@ -19,6 +19,23 @@ from model.coverage_sim import (
 logger = logging.getLogger(__name__)
 
 
+def lookup_season_week(schedules_df, home_abbr, away_abbr):
+    """
+    Find the season/week for an upcoming (not-yet-played) matchup, so the ledger can record
+    which NFL week a pick belongs to and reconciliation knows when the game happens.
+    Returns (None, None) if no matching upcoming game is found.
+    """
+    matches = schedules_df[
+        (schedules_df["home_team"] == home_abbr)
+        & (schedules_df["away_team"] == away_abbr)
+        & (schedules_df["home_score"].isna())
+    ]
+    if matches.empty:
+        return None, None
+    row = matches.sort_values(["season", "week"]).iloc[0]
+    return int(row["season"]), int(row["week"])
+
+
 def get_stats_years():
     """Which seasons to pull stats for. Requests the last 3 years — any year whose data
     hasn't been published yet (including the current season before it starts) is
@@ -50,38 +67,45 @@ def run_game_screener(schedules_df, name_map, markets="spreads,totals"):
             logger.debug(f"Skipping {away_full} @ {home_full} — not enough rating data yet")
             continue
 
-        spread_lines, total_lines = [], []
+        spread_lines, spread_prices, total_lines, total_prices = [], [], [], []
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
                 if market["key"] == "spreads":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == home_full:
                             spread_lines.append(outcome["point"])
+                            spread_prices.append(outcome["price"])
                 elif market["key"] == "totals":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == "Over":
                             total_lines.append(outcome["point"])
+                            total_prices.append(outcome["price"])
 
+        season, week = lookup_season_week(schedules_df, home_abbr, away_abbr)
         game_context = {
             "home_team": home_abbr,
             "away_team": away_abbr,
             "commence_time": game.get("commence_time"),
+            "season": season,
+            "week": week,
         }
 
         if spread_lines:
             flag = screen_spread(prediction, sum(spread_lines) / len(spread_lines))
             if flag:
+                flag["price"] = sum(spread_prices) / len(spread_prices)
                 flags.append({**flag, **game_context})
 
         if total_lines:
             flag = screen_total(prediction, sum(total_lines) / len(total_lines))
             if flag:
+                flag["price"] = sum(total_prices) / len(total_prices)
                 flags.append({**flag, **game_context})
 
     return rank_games(flags)
 
 
-def run_props_screener(weekly_df, name_map, games_window=8):
+def run_props_screener(weekly_df, schedules_df, name_map, games_window=8):
     """
     Screen every available player prop line against the player-vs-defense trend model.
 
@@ -110,8 +134,9 @@ def run_props_screener(weekly_df, name_map, games_window=8):
             logger.warning(f"Failed to fetch props for {away_full} @ {home_full}: {e}")
             continue
 
-        # Average each player's line across bookmakers before screening, same as game odds
+        # Average each player's line/price across bookmakers before screening, same as game odds
         lines_by_player_market = {}
+        prices_by_player_market = {}
         for bookmaker in props.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
                 market_key = market["key"]
@@ -121,9 +146,14 @@ def run_props_screener(weekly_df, name_map, games_window=8):
                     player_name = outcome["description"]
                     key = (market_key, player_name)
                     lines_by_player_market.setdefault(key, []).append(outcome["point"])
+                    prices_by_player_market.setdefault(key, []).append(outcome["price"])
+
+        season, week = lookup_season_week(schedules_df, home_abbr, away_abbr)
 
         for (market_key, player_name), lines in lines_by_player_market.items():
             avg_line = sum(lines) / len(lines)
+            prices = prices_by_player_market[(market_key, player_name)]
+            avg_price = sum(prices) / len(prices)
 
             if not has_nfl_history(weekly_df, player_name):
                 no_data.append({
@@ -144,12 +174,16 @@ def run_props_screener(weekly_df, name_map, games_window=8):
 
             flag = screen_player_prop(weekly_df, player_name, market_key, opponent, avg_line, games_window, ratings_cache)
             if flag:
+                flag.update({
+                    "price": avg_price, "season": season, "week": week,
+                    "home_team": home_abbr, "away_team": away_abbr, "commence_time": event.get("commence_time"),
+                })
                 (speculative_flags if flag["speculative"] else flags).append(flag)
 
     return rank_props(flags), rank_props(speculative_flags), no_data
 
 
-def run_coverage_screener(weekly_df, pbp_df, name_map, games_window=8):
+def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, games_window=8):
     """
     Screen receiving props (receptions, receiving yards only — the underlying data is
     specifically about pass coverage) with the coverage-simulation model: a player's own
@@ -178,6 +212,7 @@ def run_coverage_screener(weekly_df, pbp_df, name_map, games_window=8):
             continue
 
         lines_by_player_market = {}
+        prices_by_player_market = {}
         for bookmaker in props.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
                 market_key = market["key"]
@@ -187,10 +222,15 @@ def run_coverage_screener(weekly_df, pbp_df, name_map, games_window=8):
                     if outcome["name"] != "Over":
                         continue
                     player_name = outcome["description"]
-                    lines_by_player_market.setdefault((market_key, player_name), []).append(outcome["point"])
+                    key = (market_key, player_name)
+                    lines_by_player_market.setdefault(key, []).append(outcome["point"])
+                    prices_by_player_market.setdefault(key, []).append(outcome["price"])
+
+        season, week = lookup_season_week(schedules_df, home_abbr, away_abbr)
 
         for (market_key, player_name), lines in lines_by_player_market.items():
             avg_line = sum(lines) / len(lines)
+            avg_price = sum(prices_by_player_market[(market_key, player_name)]) / len(prices_by_player_market[(market_key, player_name)])
 
             player_rows = weekly_df[weekly_df["player_display_name"] == player_name]
             if player_rows.empty:
@@ -221,6 +261,10 @@ def run_coverage_screener(weekly_df, pbp_df, name_map, games_window=8):
             coverage_splits = player_coverage_splits(pbp_df, player_id)
             flag = screen_simplified_coverage_prop(player_name, market_key, opponent, player_avg_targets, zone_rate, coverage_splits, avg_line)
             if flag:
+                flag.update({
+                    "price": avg_price, "season": season, "week": week,
+                    "home_team": home_abbr, "away_team": away_abbr, "commence_time": event.get("commence_time"),
+                })
                 flags.append(flag)
 
     return rank_props(flags)
@@ -238,9 +282,9 @@ def run_screener(props_only=False, games_only=False):
     if games_only:
         prop_flags, prop_speculative, prop_no_data, prop_coverage = [], [], [], []
     else:
-        prop_flags, prop_speculative, prop_no_data = run_props_screener(weekly_df, name_map)
+        prop_flags, prop_speculative, prop_no_data = run_props_screener(weekly_df, schedules_df, name_map)
         pbp_df = get_play_by_play(years)
-        prop_coverage = run_coverage_screener(weekly_df, pbp_df, name_map)
+        prop_coverage = run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map)
 
     return {
         "games": game_flags,
@@ -249,3 +293,43 @@ def run_screener(props_only=False, games_only=False):
         "props_coverage": prop_coverage,
         "props_no_data": prop_no_data,
     }
+
+
+def log_results_to_ledger(results):
+    """
+    Record every currently-flagged pick into the permanent performance ledger, so it can be
+    reconciled against real results later and rolled up into a season-long track record.
+    Picks without a resolved season/week (shouldn't normally happen for real games, but
+    guards against it) are skipped rather than logged with missing keys.
+    """
+    from screener.ledger import record_pick
+
+    def log_flag(flag, strategy, subject):
+        if flag.get("season") is None or flag.get("week") is None:
+            logger.debug(f"Skipping ledger entry for {subject} — no season/week resolved")
+            return
+        record_pick(
+            strategy=strategy,
+            season=flag["season"],
+            week=flag["week"],
+            subject=subject,
+            market=flag["market"],
+            side=flag["side"],
+            line=flag.get("market_line", flag.get("line")),
+            edge_score=flag.get("edge_score"),
+            price=flag.get("price"),
+            opponent=flag.get("opponent"),
+            home_team=flag.get("home_team"),
+            away_team=flag.get("away_team"),
+            commence_time=flag.get("commence_time"),
+            explanation=flag.get("explanation"),
+        )
+
+    for flag in results.get("games", []):
+        log_flag(flag, flag["market"], f"{flag['away_team']} @ {flag['home_team']}")
+    for flag in results.get("props", []):
+        log_flag(flag, "props_trend", flag["player"])
+    for flag in results.get("props_speculative", []):
+        log_flag(flag, "props_speculative", flag["player"])
+    for flag in results.get("props_coverage", []):
+        log_flag(flag, "props_coverage", flag["player"])

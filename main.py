@@ -30,11 +30,19 @@ def main():
     from dotenv import load_dotenv
     load_dotenv()
 
-    from screener.pipeline import run_screener
+    from screener.pipeline import run_screener, log_results_to_ledger
+    from screener.reconcile import reconcile_all
     from email_report.formatter import format_email
+
+    logger.info("Reconciling past picks against real results...")
+    recon_summary = reconcile_all()
+    if recon_summary["reconciled"]:
+        logger.info(f"Reconciled {recon_summary['reconciled']} picks ({recon_summary['still_open']} still open)")
 
     logger.info("Running screener...")
     results = run_screener(props_only=args.props_only, games_only=args.games_only)
+
+    log_results_to_ledger(results)
 
     if not any(results[k] for k in ["games", "props", "props_speculative", "props_coverage", "props_no_data"]):
         logger.warning("No bets passed the screening criteria today.")

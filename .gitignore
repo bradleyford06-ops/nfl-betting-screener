@@ -2,4 +2,5 @@
 *.pyc
 __pycache__/
 data/*.db
+!data/ledger.db
 .DS_Store
