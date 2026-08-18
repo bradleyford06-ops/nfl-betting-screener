@@ -105,4 +105,62 @@ Continuing from: first session
 None. The entire pipeline is now live and automated end-to-end: daily GitHub Actions run → screener → email with dashboard link → dashboard + ledger committed back → GitHub Pages redeploys automatically. Verified for real, not just claimed. Remaining work is validation against real season data as it accumulates (blocked on the season happening, not on us) and confirming Bradley's Odds API upgrade (blocked on him, not us).
 
 ## End of Session
-[/session-end will fill this in]
+
+Completed this session:
+- Built the full NFL betting screener from scratch: two independent strategies — a power-rating model for spreads/totals/moneylines, and player props (a trend model plus, later, a second independent coverage/zone-vs-man model)
+- Backtested the game model against 6 real seasons (2019-2024); found moneyline was actively unprofitable and disabled it; calibrated the spread threshold against real evidence (56.4% win rate, +9.6% ROI)
+- Opponent-adjusted the props trend model, added rookie and small-sample handling, then calibrated per-position/stat thresholds using a synthetic-line backtest
+- Built a coverage (zone/man) model for receiving props at Bradley's suggestion — first version failed backtesting, a simplified version passed and now runs as a second, independent signal
+- Built a permanent performance ledger that auto-reconciles picks against real results
+- Built an interactive dashboard (browse by week/game, filter, sort by edge, season performance)
+- Set up full GitHub automation: public repo, daily scheduled runs, secrets, dashboard/ledger auto-committed, GitHub Pages hosting — verified live with real triggered runs, not just assumed
+- Found and fixed a real crash in the first scheduled run (unprotected team-name lookup), verified the fix with another live run
+- Confirmed Bet365 isn't available through the odds provider; confirmed daily runs need a paid Odds API tier
+
+Still pending:
+- Bradley needs to upgrade the Odds API plan (not confirmed done yet)
+- Verify both prop models against real sportsbook lines once they're posted (closer to the season)
+- Watch the QB-rushing speculative picks over the season for a trend
+- Optional: backtest the remaining prop categories (TDs, completions, attempts), periodically re-backtest the game model as the season builds up real data
+
+Files changed:
+- `CLAUDE.md` — full project vision doc, updated repeatedly to reflect each new capability and status
+- `main.py` — CLI entry point; now reconciles picks, logs to the ledger, and generates the dashboard on every full run
+- `screener/pipeline.py` — orchestrates all screeners; captures price/season/week for the ledger; passes schedules_df through for lookups
+- `screener/fetch_stats.py`, `screener/fetch_odds.py`, `screener/fetch_pbp.py` — data fetching (stats, odds, play-by-play), all resilient to missing years
+- `screener/team_map.py` — team name/abbreviation bridge; added a static fallback after a live fetch failure crashed a scheduled run
+- `screener/cache.py` — TTL cache for API responses
+- `screener/ledger.py` — new: permanent SQLite picks ledger, tracked in git (not gitignored) so it survives GitHub Actions
+- `screener/reconcile.py` — new: grades ledger picks against real results
+- `screener/scoring.py` — ranks flagged bets
+- `model/power_ratings.py` — opponent-adjusted power-rating game model; spread/total/moneyline screening
+- `model/player_trends.py` — opponent-adjusted player props trend model; per-position/stat thresholds; rookie/small-sample handling
+- `model/coverage_sim.py` — new: coverage (zone/man) model for receiving props, both the rejected full simulation and the live simplified version
+- `backtest/` — new directory: `run_backtest.py`/`simulate.py` (game model), `run_props_backtest.py`/`simulate_props.py` (trend props), `simulate_coverage.py`/`simulate_coverage_v2.py` (coverage model)
+- `dashboard/` — new directory: `build_data.py`, `template.html`, `generate.py` — generates the interactive HTML dashboard
+- `docs/index.html` — new: the generated dashboard, served live via GitHub Pages
+- `data/ledger.db` — new: the permanent picks ledger (real data, tracked in git)
+- `email_report/formatter.py`, `email_report/send.py` — email formatting/delivery; added coverage model and speculative sections, dashboard link
+- `.github/workflows/screener.yml` — GitHub Actions workflow; daily schedule, commits dashboard/ledger back after each run
+- `.gitignore` — carved out an exception so `data/ledger.db` isn't caught by the `data/*.db` cache-ignore rule
+
+Decisions made:
+- Moneyline disabled (backtested actively unprofitable); totals kept on despite no proven edge (Bradley's explicit product call)
+- Player props stay trend-based/simple by design; games get the heavier predictive model — Bradley's original strategic split, preserved throughout
+- Coverage model runs alongside the trend model as an independent signal, not merged in or replacing it (Bradley's choice)
+- QB rushing props kept live but routed to a separate "speculative" section rather than the main list
+- Cross-book average odds kept instead of pinning to one book or switching providers, since Bet365 isn't available through this provider
+- Public GitHub repo, to get free GitHub Pages hosting for the dashboard (vs. a paid plan for private Pages)
+- Daily automated schedule instead of the original Mon/Wed/Fri/Sat plan, since odds move all week
+- The ledger is committed to git rather than gitignored, since GitHub Actions runners don't persist state between runs
+
+Blockers or warnings:
+- Odds API free tier will likely fall short once real prop volume shows up — needs Bradley's upgrade (his own payment action, not something Claude can do)
+- nfl_data_py's 2025 weekly player stats are currently returning 404 upstream — already handled gracefully by existing per-year fallback logic, just a live data-availability gap to be aware of
+- Local git identity briefly failed to auto-detect mid-session (fixed with a repo-local config, approved by Bradley) — if it recurs, will need the same quick fix
+- `data/cache.db` has grown large (160MB+) from overlapping cached year-ranges — not currently a problem, worth a cleanup pass eventually
+
+Recommended first step next session:
+Check whether Bradley has upgraded the Odds API plan yet. Then, once real player prop lines start appearing on sportsbooks (closer to the season), run `python main.py --props-only --send` (or just wait for the next daily automated run) and verify both the trend model and coverage model produce sensible, correctly-formatted picks against real posted lines for the first time — this is the single biggest remaining unknown in the whole pipeline.
+
+Session duration: Multi-day (2026-08-14 through 2026-08-18) — one long continuous build, spanning project setup, two backtested models, a second independent props signal, a permanent performance ledger, an interactive dashboard, and full GitHub automation.
