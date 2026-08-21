@@ -21,12 +21,14 @@ def format_email(results):
     lines.append("")
 
     games = results.get("games", [])
+    cfb_games = results.get("cfb_games", [])
+    cfb_totals_speculative = results.get("cfb_totals_speculative", [])
     props = results.get("props", [])
     props_speculative = results.get("props_speculative", [])
     props_coverage = results.get("props_coverage", [])
     props_no_data = results.get("props_no_data", [])
 
-    if not any([games, props, props_speculative, props_coverage, props_no_data]):
+    if not any([games, cfb_games, cfb_totals_speculative, props, props_speculative, props_coverage, props_no_data]):
         lines.append("No bets passed the screening criteria for this run.")
         lines.append(f"Check the dashboard for the full picture: {DASHBOARD_URL}")
         return "\n".join(lines)
@@ -36,6 +38,24 @@ def format_email(results):
         lines.append("=" * 60)
         lines.append("")
         for i, game in enumerate(games, 1):
+            lines += _format_game_flag(i, game)
+
+    if cfb_games:
+        lines.append(f"COLLEGE FOOTBALL — SPREADS & TOTALS  ({len(cfb_games)} flagged)")
+        lines.append("Our own opponent-adjusted power rating for all FBS teams, backtested")
+        lines.append("against 2019-2024 (54.1% win rate, +3.3% ROI at the live threshold).")
+        lines.append("=" * 60)
+        lines.append("")
+        for i, game in enumerate(cfb_games, 1):
+            lines += _format_game_flag(i, game)
+
+    if cfb_totals_speculative:
+        lines.append(f"COLLEGE FOOTBALL — TOTALS (SPECULATIVE)  ({len(cfb_totals_speculative)} flagged)")
+        lines.append("Backtesting found no proven edge for CFB totals (same as the NFL total")
+        lines.append("model) — kept visible, but treat these as informational, not a recommendation.")
+        lines.append("=" * 60)
+        lines.append("")
+        for i, game in enumerate(cfb_totals_speculative, 1):
             lines += _format_game_flag(i, game)
 
     if props:

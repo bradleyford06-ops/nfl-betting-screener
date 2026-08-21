@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.the-odds-api.com/v4"
 SPORT = "americanfootball_nfl"
+CFB_SPORT = "americanfootball_ncaaf"
 ODDS_CACHE_TTL_HOURS = 6  # lines move during the week, but we only run a few times a week
 
 PROP_MARKETS = [
@@ -42,16 +43,16 @@ def get_events():
     return events
 
 
-def get_game_odds(regions="us", markets="h2h,spreads,totals"):
-    """Fetch moneyline/spread/total odds for all upcoming NFL games, with caching."""
-    cache_key = f"odds_games_{markets}"
+def get_game_odds(regions="us", markets="h2h,spreads,totals", sport=SPORT):
+    """Fetch moneyline/spread/total odds for all upcoming games in `sport`, with caching."""
+    cache_key = f"odds_games_{sport}_{markets}"
     cached = get_cached(cache_key, ODDS_CACHE_TTL_HOURS)
     if cached is not None:
         return cached
 
-    logger.info(f"Fetching game odds ({markets})...")
+    logger.info(f"Fetching game odds ({sport}, {markets})...")
     resp = requests.get(
-        f"{BASE_URL}/sports/{SPORT}/odds",
+        f"{BASE_URL}/sports/{sport}/odds",
         params={
             "apiKey": _api_key(),
             "regions": regions,

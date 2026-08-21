@@ -4,10 +4,12 @@ from datetime import datetime
 
 from screener.fetch_stats import get_weekly_player_stats, get_schedules
 from screener.fetch_pbp import get_play_by_play
-from screener.fetch_odds import get_events, get_game_odds, get_player_props
+from screener.fetch_odds import get_events, get_game_odds, get_player_props, CFB_SPORT
+from screener.fetch_cfb_stats import get_cfb_schedules, get_cfb_team_name_map, to_cfb_school_name
 from screener.team_map import get_team_name_to_abbr, to_abbr
 from screener.scoring import rank_props, rank_games
 from model.power_ratings import compute_team_ratings, predict_matchup, screen_spread, screen_total
+from model.cfb_power_ratings import compute_cfb_team_ratings, predict_cfb_matchup, screen_cfb_spread, screen_cfb_total
 from model.player_trends import (
     screen_player_prop, player_current_team, has_nfl_history,
     get_position_stat_ratings, player_adjusted_average,
@@ -17,6 +19,11 @@ from model.coverage_sim import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Bradley's call (2026-08-20): CFB totals have no backtested edge (same as the NFL total
+# model) but aren't broken either — see model/cfb_power_ratings.py for the investigation.
+# Kept live, routed to their own speculative section rather than the main results.
+CFB_TOTALS_ENABLED = True
 
 
 def lookup_season_week(schedules_df, home_abbr, away_abbr):
@@ -54,6 +61,91 @@ def get_stats_years():
     """Which seasons to pull stats for. Requests the last 3 years — any year whose data
     hasn't been published yet (including the current season before it starts) is
     automatically skipped by the fetch layer, so this always falls back to real data."""
+    year = datetime.now().year
+    return [year - 2, year - 1, year]
+
+
+def get_cfb_current_week(cfb_schedules_df):
+    """
+    Find the nearest upcoming CFB week — same idea as get_current_week, but restricted to
+    the most recent season in the data. cfbd's real-world data has occasional leftover
+    "unplayed" rows from past seasons (e.g. a 2024 game postponed by a hurricane and never
+    marked complete or rescheduled) — searching across all fetched years the way the NFL
+    version does would get fooled by one of these into reporting a stale week from a season
+    that's actually long over. Found in testing 2026-08-20 (App State @ Liberty, 2024 wk 5).
+    """
+    latest_season = cfb_schedules_df["season"].max()
+    return get_current_week(cfb_schedules_df[cfb_schedules_df["season"] == latest_season])
+
+
+def run_cfb_game_screener(cfb_schedules_df, cfb_name_map, current_season, current_week, markets="spreads,totals"):
+    """
+    Screen the upcoming week's FBS college football spread and total against our CFB
+    power-rating model. Spread has a real backtested edge (see backtest/run_cfb_backtest.py);
+    total does not, so its flags are kept separate as speculative rather than mixed into
+    the main results — same treatment as the NFL total model.
+
+    Games against an FCS opponent are silently skipped — predict_cfb_matchup returns None
+    for them, since the FCS side never gets a real rating of its own.
+    """
+    ratings = compute_cfb_team_ratings(cfb_schedules_df)
+    games = get_game_odds(markets=markets, sport=CFB_SPORT)
+    flags = []
+    speculative_flags = []
+
+    for game in games:
+        home_full, away_full = game["home_team"], game["away_team"]
+        home_school = to_cfb_school_name(home_full, cfb_name_map)
+        away_school = to_cfb_school_name(away_full, cfb_name_map)
+
+        season, week = lookup_season_week(cfb_schedules_df, home_school, away_school)
+        if current_week is not None and (season, week) != (current_season, current_week):
+            continue  # only the upcoming week's slate, same reasoning as the NFL game screener
+
+        prediction = predict_cfb_matchup(ratings, home_school, away_school)
+        if prediction is None:
+            logger.debug(f"Skipping {away_full} @ {home_full} — not enough CFB rating data yet, or an FCS opponent")
+            continue
+
+        spread_lines, spread_prices, total_lines, total_prices = [], [], [], []
+        for bookmaker in game.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                if market["key"] == "spreads":
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == home_full:
+                            spread_lines.append(outcome["point"])
+                            spread_prices.append(outcome["price"])
+                elif market["key"] == "totals":
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == "Over":
+                            total_lines.append(outcome["point"])
+                            total_prices.append(outcome["price"])
+
+        game_context = {
+            "home_team": home_school,
+            "away_team": away_school,
+            "commence_time": game.get("commence_time"),
+            "season": season,
+            "week": week,
+        }
+
+        if spread_lines:
+            flag = screen_cfb_spread(prediction, sum(spread_lines) / len(spread_lines))
+            if flag:
+                flag["price"] = sum(spread_prices) / len(spread_prices)
+                flags.append({**flag, **game_context})
+
+        if CFB_TOTALS_ENABLED and total_lines:
+            flag = screen_cfb_total(prediction, sum(total_lines) / len(total_lines))
+            if flag:
+                flag["price"] = sum(total_prices) / len(total_prices)
+                speculative_flags.append({**flag, **game_context})
+
+    return rank_games(flags), rank_games(speculative_flags)
+
+
+def get_cfb_stats_years():
+    """Which CFB seasons to pull stats for — same reasoning as get_stats_years."""
     year = datetime.now().year
     return [year - 2, year - 1, year]
 
@@ -306,6 +398,25 @@ def run_screener(props_only=False, games_only=False):
 
     game_flags = [] if props_only else run_game_screener(schedules_df, name_map, current_season, current_week)
 
+    cfb_game_flags, cfb_totals_speculative = [], []
+    if not props_only:
+        try:
+            cfb_years = get_cfb_stats_years()
+            cfb_schedules_df = get_cfb_schedules(cfb_years)
+            cfb_name_map = get_cfb_team_name_map(cfb_years[-1])
+            cfb_current_season, cfb_current_week = get_cfb_current_week(cfb_schedules_df)
+            if cfb_current_week is None:
+                logger.warning("Could not determine the upcoming CFB week from the schedule — screening every game found instead of just the next slate")
+            else:
+                logger.info(f"Screening CFB for {cfb_current_season} week {cfb_current_week}")
+            cfb_game_flags, cfb_totals_speculative = run_cfb_game_screener(
+                cfb_schedules_df, cfb_name_map, cfb_current_season, cfb_current_week
+            )
+        except Exception as e:
+            # A CFB-side failure (data source down, misconfigured key, etc.) should never
+            # take down the whole NFL run — degrade to "no CFB picks this run" instead.
+            logger.error(f"CFB screening failed, skipping CFB for this run: {e}")
+
     if games_only:
         prop_flags, prop_speculative, prop_no_data, prop_coverage = [], [], [], []
     else:
@@ -315,6 +426,8 @@ def run_screener(props_only=False, games_only=False):
 
     return {
         "games": game_flags,
+        "cfb_games": cfb_game_flags,
+        "cfb_totals_speculative": cfb_totals_speculative,
         "props": prop_flags,
         "props_speculative": prop_speculative,
         "props_coverage": prop_coverage,
@@ -354,6 +467,10 @@ def log_results_to_ledger(results):
 
     for flag in results.get("games", []):
         log_flag(flag, flag["market"], f"{flag['away_team']} @ {flag['home_team']}")
+    for flag in results.get("cfb_games", []):
+        log_flag(flag, f"cfb_{flag['market']}", f"{flag['away_team']} @ {flag['home_team']}")
+    for flag in results.get("cfb_totals_speculative", []):
+        log_flag(flag, f"cfb_{flag['market']}_speculative", f"{flag['away_team']} @ {flag['home_team']}")
     for flag in results.get("props", []):
         log_flag(flag, "props_trend", flag["player"])
     for flag in results.get("props_speculative", []):

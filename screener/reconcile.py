@@ -3,6 +3,7 @@ import pandas as pd
 
 from screener.ledger import get_open_picks, mark_result
 from screener.fetch_stats import get_schedules, get_weekly_player_stats
+from screener.fetch_cfb_stats import get_cfb_schedules
 from model.player_trends import PROP_STAT_MAP
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,16 @@ def reconcile_all():
     try:
         schedules_df = get_schedules(seasons_needed)
     except RuntimeError:
-        logger.info("No schedule data available yet for any open picks' seasons — nothing to reconcile.")
+        logger.info("No NFL schedule data available yet for any open picks' seasons — skipping NFL game reconciliation.")
+        schedules_df = None
+
+    try:
+        cfb_schedules_df = get_cfb_schedules(seasons_needed)
+    except Exception as e:
+        logger.info(f"No CFB schedule data available yet — skipping CFB game reconciliation: {e}")
+        cfb_schedules_df = None
+
+    if schedules_df is None and cfb_schedules_df is None:
         return {"reconciled": 0, "still_open": len(open_picks)}
 
     try:
@@ -113,7 +123,10 @@ def reconcile_all():
             continue
 
         if pick["market"] in GAME_MARKETS:
-            result = _find_game_result(schedules_df, pick["season"], pick["week"], pick["home_team"], pick["away_team"])
+            active_schedule = cfb_schedules_df if pick["strategy"].startswith("cfb_") else schedules_df
+            if active_schedule is None:
+                continue
+            result = _find_game_result(active_schedule, pick["season"], pick["week"], pick["home_team"], pick["away_team"])
             if result is None:
                 continue
             home_score, away_score = result

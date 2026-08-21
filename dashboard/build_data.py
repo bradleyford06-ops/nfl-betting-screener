@@ -102,11 +102,70 @@ def build_this_week_data(results):
     return week_list
 
 
+def build_cfb_week_data(results):
+    """
+    Group this run's flagged CFB games (spread + speculative totals) by (season, week), then
+    by matchup — same shape as build_this_week_data, kept as its own function (and its own
+    top-level "cfb_weeks" payload key) rather than merged into "weeks", since CFB and NFL
+    both have a "Week 1" that means a different set of games and a different calendar date.
+    """
+    weeks = {}
+
+    def get_week_bucket(season, week):
+        if season is None or week is None:
+            return None
+        key = (season, week)
+        if key not in weeks:
+            weeks[key] = {"season": season, "week": week, "games": {}}
+        return weeks[key]
+
+    def get_game_bucket(bucket, flag):
+        game_key = _game_key(flag["home_team"], flag["away_team"])
+        if game_key not in bucket["games"]:
+            bucket["games"][game_key] = {
+                "matchup": game_key,
+                "home_team": flag["home_team"],
+                "away_team": flag["away_team"],
+                "commence_time": flag.get("commence_time"),
+                "game_flags": [],
+            }
+        return bucket["games"][game_key]
+
+    for source_key in ("cfb_games", "cfb_totals_speculative"):
+        for flag in results.get(source_key, []):
+            bucket = get_week_bucket(flag.get("season"), flag.get("week"))
+            if bucket is None:
+                continue
+            game = get_game_bucket(bucket, flag)
+            game["game_flags"].append({
+                "market": flag["market"],
+                "market_label": GAME_MARKET_LABELS.get(flag["market"], flag["market"]),
+                "side": flag["side"],
+                "line": flag.get("market_line"),
+                "price": flag.get("price"),
+                "edge_score": flag["edge_score"],
+                "explanation": flag["explanation"],
+                "speculative": source_key == "cfb_totals_speculative",
+            })
+
+    week_list = []
+    for (season, week), bucket in sorted(weeks.items()):
+        games = list(bucket["games"].values())
+        for game in games:
+            game["max_edge"] = max((g["edge_score"] for g in game["game_flags"]), default=0)
+            game["game_flags"].sort(key=lambda g: g["edge_score"], reverse=True)
+        games.sort(key=lambda g: g["max_edge"], reverse=True)
+        week_list.append({"season": season, "week": week, "games": games})
+
+    return week_list
+
+
 def build_dashboard_data(results, season_summary, all_picks):
     """Top-level payload embedded in the dashboard HTML."""
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "weeks": build_this_week_data(results),
+        "cfb_weeks": build_cfb_week_data(results),
         "season_performance": season_summary,
         "recent_picks": [p for p in all_picks if p["status"] != "open"][-100:],
     }

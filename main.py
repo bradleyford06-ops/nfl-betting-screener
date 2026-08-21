@@ -58,7 +58,9 @@ def main():
         dashboard_data = build_dashboard_data(results, summarize_season(), get_all_picks())
         write_dashboard(dashboard_data, "docs/index.html")
 
-    if not any(results[k] for k in ["games", "props", "props_speculative", "props_coverage", "props_no_data"]):
+    if not any(results[k] for k in [
+        "games", "cfb_games", "cfb_totals_speculative", "props", "props_speculative", "props_coverage", "props_no_data",
+    ]):
         logger.warning("No bets passed the screening criteria today.")
         sys.exit(0)
 

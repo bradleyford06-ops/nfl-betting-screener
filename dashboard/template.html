@@ -200,6 +200,7 @@
 
 <nav class="tabs">
   <button class="tab-btn active" data-tab="upcoming">Upcoming Picks</button>
+  <button class="tab-btn" data-tab="cfb">College Football</button>
   <button class="tab-btn" data-tab="season">Season Performance</button>
 </nav>
 
@@ -218,6 +219,12 @@
       <label><input type="checkbox" id="filter-hide-small"> Hide small-sample props</label>
     </div>
     <div id="games-container"></div>
+  </div>
+
+  <div class="view" id="view-cfb">
+    <div class="subhead" style="margin-top:0;">FBS spreads &amp; totals — our own opponent-adjusted power rating, validated against SP+. Spread is backtested with a real edge; totals have none (see explanation on speculative picks below), same treatment as the NFL total model.</div>
+    <div class="week-pills" id="cfb-week-pills"></div>
+    <div id="cfb-games-container"></div>
   </div>
 
   <div class="view" id="view-season">
@@ -380,7 +387,7 @@ function renderGameFlagsTable(flags) {
   flags.forEach(f => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${f.market_label}</td>
+      <td>${f.market_label}${f.speculative ? ' <span class="source-tag">speculative</span>' : ""}</td>
       <td><span class="side-pill">${f.side}</span></td>
       <td>${f.line != null ? f.line.toFixed(1) : "-"}${f.price ? " (" + Math.round(f.price) + ")" : ""}</td>
       <td>${f.edge_score.toFixed(2)}</td>`;
@@ -398,6 +405,56 @@ function renderGameFlagsTable(flags) {
   wrap.className = "table-scroll";
   wrap.appendChild(table);
   return wrap;
+}
+
+// ---------- College Football ----------
+let currentCfbWeekIndex = 0;
+
+function renderCfbWeekPills() {
+  const container = document.getElementById("cfb-week-pills");
+  container.innerHTML = "";
+  DATA.cfb_weeks.forEach((w, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = `Week ${w.week}`;
+    if (i === currentCfbWeekIndex) btn.classList.add("active");
+    btn.addEventListener("click", () => { currentCfbWeekIndex = i; renderCfbWeekPills(); renderCfbGames(); });
+    container.appendChild(btn);
+  });
+}
+
+function renderCfbGames() {
+  const container = document.getElementById("cfb-games-container");
+  container.innerHTML = "";
+  const week = DATA.cfb_weeks[currentCfbWeekIndex];
+  if (!week || week.games.length === 0) {
+    container.innerHTML = '<div class="empty-state">No CFB picks flagged right now.</div>';
+    return;
+  }
+
+  week.games.forEach(game => {
+    const card = document.createElement("div");
+    card.className = "game-card";
+
+    const header = document.createElement("div");
+    header.className = "game-card-header";
+    header.innerHTML = `
+      <div>
+        <div class="game-matchup">${game.matchup}</div>
+        <div class="game-meta">${game.game_flags.length} pick${game.game_flags.length===1?"":"s"}</div>
+      </div>
+      <div class="badge-row">
+        <span class="badge ${edgeBadgeClass(game.max_edge, false)}">top edge ${game.max_edge.toFixed(2)}</span>
+        <span class="chevron">&#9656;</span>
+      </div>`;
+    header.addEventListener("click", () => card.classList.toggle("open"));
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "game-card-body";
+    body.appendChild(renderGameFlagsTable(game.game_flags));
+    card.appendChild(body);
+    container.appendChild(card);
+  });
 }
 
 function renderPropsTable(props) {
@@ -493,6 +550,8 @@ function renderSeasonPerformance() {
 populateMarketFilter();
 renderWeekPills();
 renderGames();
+renderCfbWeekPills();
+renderCfbGames();
 renderSeasonPerformance();
 </script>
 
