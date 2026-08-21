@@ -36,6 +36,20 @@ def lookup_season_week(schedules_df, home_abbr, away_abbr):
     return int(row["season"]), int(row["week"])
 
 
+def get_current_week(schedules_df):
+    """
+    Find the nearest upcoming NFL week — the earliest (season, week) that still has at
+    least one unplayed game. The odds API returns odds for every remaining game in the
+    season in one call, so screening needs this to restrict results to just the next
+    slate rather than flagging edges across the whole rest of the year.
+    """
+    unplayed = schedules_df[schedules_df["home_score"].isna()]
+    if unplayed.empty:
+        return None, None
+    row = unplayed.sort_values(["season", "week"]).iloc[0]
+    return int(row["season"]), int(row["week"])
+
+
 def get_stats_years():
     """Which seasons to pull stats for. Requests the last 3 years — any year whose data
     hasn't been published yet (including the current season before it starts) is
@@ -44,9 +58,9 @@ def get_stats_years():
     return [year - 2, year - 1, year]
 
 
-def run_game_screener(schedules_df, name_map, markets="spreads,totals"):
+def run_game_screener(schedules_df, name_map, current_season, current_week, markets="spreads,totals"):
     """
-    Screen every upcoming NFL game's spread and total against our power-rating model.
+    Screen the upcoming week's NFL games' spread and total against our power-rating model.
 
     Moneyline screening is intentionally left out: a backtest against 2019-2024 (see
     backtest/run_backtest.py) showed it lost -20.8% ROI, because the model's win
@@ -61,6 +75,10 @@ def run_game_screener(schedules_df, name_map, markets="spreads,totals"):
     for game in games:
         home_full, away_full = game["home_team"], game["away_team"]
         home_abbr, away_abbr = to_abbr(home_full, name_map), to_abbr(away_full, name_map)
+
+        season, week = lookup_season_week(schedules_df, home_abbr, away_abbr)
+        if current_week is not None and (season, week) != (current_season, current_week):
+            continue  # only the upcoming week's slate — the odds API returns the whole season at once
 
         prediction = predict_matchup(ratings, home_abbr, away_abbr)
         if prediction is None:
@@ -81,7 +99,6 @@ def run_game_screener(schedules_df, name_map, markets="spreads,totals"):
                             total_lines.append(outcome["point"])
                             total_prices.append(outcome["price"])
 
-        season, week = lookup_season_week(schedules_df, home_abbr, away_abbr)
         game_context = {
             "home_team": home_abbr,
             "away_team": away_abbr,
@@ -105,9 +122,9 @@ def run_game_screener(schedules_df, name_map, markets="spreads,totals"):
     return rank_games(flags)
 
 
-def run_props_screener(weekly_df, schedules_df, name_map, games_window=8):
+def run_props_screener(weekly_df, schedules_df, name_map, current_season, current_week, games_window=8):
     """
-    Screen every available player prop line against the player-vs-defense trend model.
+    Screen the upcoming week's player prop lines against the player-vs-defense trend model.
 
     Players with zero NFL game history (true rookie debuts) can't have a trend computed —
     rather than silently vanishing them, they're collected into a separate "no data yet"
@@ -128,6 +145,10 @@ def run_props_screener(weekly_df, schedules_df, name_map, games_window=8):
         home_full, away_full = event["home_team"], event["away_team"]
         home_abbr, away_abbr = to_abbr(home_full, name_map), to_abbr(away_full, name_map)
 
+        season, week = lookup_season_week(schedules_df, home_abbr, away_abbr)
+        if current_week is not None and (season, week) != (current_season, current_week):
+            continue  # only the upcoming week — skip the props fetch entirely to save API quota
+
         try:
             props = get_player_props(event["id"])
         except Exception as e:
@@ -147,8 +168,6 @@ def run_props_screener(weekly_df, schedules_df, name_map, games_window=8):
                     key = (market_key, player_name)
                     lines_by_player_market.setdefault(key, []).append(outcome["point"])
                     prices_by_player_market.setdefault(key, []).append(outcome["price"])
-
-        season, week = lookup_season_week(schedules_df, home_abbr, away_abbr)
 
         for (market_key, player_name), lines in lines_by_player_market.items():
             avg_line = sum(lines) / len(lines)
@@ -183,12 +202,12 @@ def run_props_screener(weekly_df, schedules_df, name_map, games_window=8):
     return rank_props(flags), rank_props(speculative_flags), no_data
 
 
-def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, games_window=8):
+def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, current_season, current_week, games_window=8):
     """
-    Screen receiving props (receptions, receiving yards only — the underlying data is
-    specifically about pass coverage) with the coverage-simulation model: a player's own
-    opponent-adjusted target volume times a zone/man efficiency modifier based on this
-    week's specific opponent's coverage tendency.
+    Screen the upcoming week's receiving props (receptions, receiving yards only — the
+    underlying data is specifically about pass coverage) with the coverage-simulation
+    model: a player's own opponent-adjusted target volume times a zone/man efficiency
+    modifier based on this week's specific opponent's coverage tendency.
 
     Runs as a second, independent signal alongside the trend model (run_props_screener) —
     backtested separately (backtest/simulate_coverage_v2.py) and validated on its own
@@ -204,6 +223,10 @@ def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, games_windo
     for event in events:
         home_full, away_full = event["home_team"], event["away_team"]
         home_abbr, away_abbr = to_abbr(home_full, name_map), to_abbr(away_full, name_map)
+
+        season, week = lookup_season_week(schedules_df, home_abbr, away_abbr)
+        if current_week is not None and (season, week) != (current_season, current_week):
+            continue  # only the upcoming week — same cache key as run_props_screener, so this still costs nothing extra
 
         try:
             props = get_player_props(event["id"])  # same default markets as run_props_screener — cache hit, no extra API cost
@@ -225,8 +248,6 @@ def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, games_windo
                     key = (market_key, player_name)
                     lines_by_player_market.setdefault(key, []).append(outcome["point"])
                     prices_by_player_market.setdefault(key, []).append(outcome["price"])
-
-        season, week = lookup_season_week(schedules_df, home_abbr, away_abbr)
 
         for (market_key, player_name), lines in lines_by_player_market.items():
             avg_line = sum(lines) / len(lines)
@@ -277,14 +298,20 @@ def run_screener(props_only=False, games_only=False):
     schedules_df = get_schedules(years)
     name_map = get_team_name_to_abbr()
 
-    game_flags = [] if props_only else run_game_screener(schedules_df, name_map)
+    current_season, current_week = get_current_week(schedules_df)
+    if current_week is None:
+        logger.warning("Could not determine the upcoming NFL week from the schedule — screening every game found instead of just the next slate")
+    else:
+        logger.info(f"Screening for {current_season} week {current_week}")
+
+    game_flags = [] if props_only else run_game_screener(schedules_df, name_map, current_season, current_week)
 
     if games_only:
         prop_flags, prop_speculative, prop_no_data, prop_coverage = [], [], [], []
     else:
-        prop_flags, prop_speculative, prop_no_data = run_props_screener(weekly_df, schedules_df, name_map)
+        prop_flags, prop_speculative, prop_no_data = run_props_screener(weekly_df, schedules_df, name_map, current_season, current_week)
         pbp_df = get_play_by_play(years)
-        prop_coverage = run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map)
+        prop_coverage = run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, current_season, current_week)
 
     return {
         "games": game_flags,
