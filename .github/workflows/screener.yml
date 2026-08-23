@@ -28,6 +28,7 @@ jobs:
           echo "ODDS_API_KEY=${{ secrets.ODDS_API_KEY }}" >> .env
           echo "GMAIL_ADDRESS=${{ secrets.GMAIL_ADDRESS }}" >> .env
           echo "GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}" >> .env
+          echo "CFBD_API_KEY=${{ secrets.CFBD_API_KEY }}" >> .env
 
       - name: Run screener
         run: python main.py --send
