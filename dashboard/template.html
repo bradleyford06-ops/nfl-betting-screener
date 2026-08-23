@@ -569,6 +569,23 @@ function renderPropsTable(props) {
 });
 
 // ---------- Season Performance ----------
+const STRATEGY_LABELS = {
+  spread: "NFL Spread",
+  total: "NFL Total",
+  cfb_spread: "CFB Spread",
+  cfb_total_speculative: "CFB Total (Speculative)",
+  props_trend: "Player Props (Trend)",
+  props_speculative: "Player Props (Speculative)",
+  props_coverage: "Player Props (Coverage)",
+  nhl_moneyline: "NHL Moneyline",
+  nhl_total: "NHL Total",
+  nhl_puckline_speculative: "NHL Puck Line (Speculative)",
+};
+
+function strategyLabel(strategy) {
+  return STRATEGY_LABELS[strategy] || strategy;
+}
+
 function renderSeasonPerformance() {
   const cardsContainer = document.getElementById("perf-cards");
   cardsContainer.innerHTML = "";
@@ -591,7 +608,7 @@ function renderSeasonPerformance() {
   cardsContainer.appendChild(card("Overall ROI", `${o.roi_pct >= 0 ? "+" : ""}${o.roi_pct}%`, `${o.bets} bet${o.bets === 1 ? "" : "s"}`, o.roi_pct >= 0 ? "roi-positive" : "roi-negative"));
 
   Object.entries(perf.by_strategy || {}).forEach(([strategy, s]) => {
-    cardsContainer.appendChild(card(strategy, `${s.wins}-${s.losses}`, `${(s.win_rate*100).toFixed(1)}% | ROI ${s.roi_pct >= 0 ? "+" : ""}${s.roi_pct}%`, s.roi_pct >= 0 ? "roi-positive" : "roi-negative"));
+    cardsContainer.appendChild(card(strategyLabel(strategy), `${s.wins}-${s.losses}`, `${(s.win_rate*100).toFixed(1)}% | ROI ${s.roi_pct >= 0 ? "+" : ""}${s.roi_pct}%`, s.roi_pct >= 0 ? "roi-positive" : "roi-negative"));
   });
 
   const tbody = document.querySelector("#recent-picks-table tbody");
