@@ -99,9 +99,18 @@ def main():
     recon_summary = reconcile_all()
     if recon_summary["reconciled"]:
         logger.info(f"Reconciled {recon_summary['reconciled']} picks ({recon_summary['still_open']} still open)")
+    if recon_summary.get("cfb_error") and args.send:
+        from email_report.error_alert import send_partial_failure_alert
+        logger.info("Sending CFB reconciliation partial-failure alert...")
+        send_partial_failure_alert("CFB reconciliation", recon_summary["cfb_error"])
 
     logger.info("Running screener...")
     results = run_screener(props_only=args.props_only, games_only=args.games_only)
+
+    if results.get("cfb_error") and args.send:
+        from email_report.error_alert import send_partial_failure_alert
+        logger.info("Sending CFB screening partial-failure alert...")
+        send_partial_failure_alert("CFB screening", results["cfb_error"])
 
     log_results_to_ledger(results)
 

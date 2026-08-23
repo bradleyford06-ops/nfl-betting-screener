@@ -100,14 +100,25 @@ def reconcile_all():
         logger.info("No NFL schedule data available yet for any open picks' seasons — skipping NFL game reconciliation.")
         schedules_df = None
 
+    cfb_error = None
     try:
         cfb_schedules_df = get_cfb_schedules(seasons_needed)
-    except Exception as e:
-        logger.info(f"No CFB schedule data available yet — skipping CFB game reconciliation: {e}")
+    except RuntimeError:
+        # cfbd itself reports no data published yet — normal early in a season, not a
+        # real failure, so no alert.
+        logger.info("No CFB schedule data available yet — skipping CFB game reconciliation.")
         cfb_schedules_df = None
+    except Exception as e:
+        # Anything else (bad/missing API key, cfbd outage, etc.) is a real failure, not
+        # an expected "not published yet" gap — same alerting reasoning as the CFB
+        # screening failure in screener/pipeline.py: this is caught here so it can't take
+        # down NFL reconciliation, but that means it's otherwise invisible.
+        logger.error(f"CFB schedule fetch failed, skipping CFB game reconciliation: {e}")
+        cfb_schedules_df = None
+        cfb_error = str(e)
 
     if schedules_df is None and cfb_schedules_df is None:
-        return {"reconciled": 0, "still_open": len(open_picks)}
+        return {"reconciled": 0, "still_open": len(open_picks), "cfb_error": cfb_error}
 
     try:
         weekly_df = get_weekly_player_stats(seasons_needed)
@@ -148,7 +159,7 @@ def reconcile_all():
         mark_result(pick["id"], outcome, actual_value)
         reconciled += 1
 
-    return {"reconciled": reconciled, "still_open": len(open_picks) - reconciled}
+    return {"reconciled": reconciled, "still_open": len(open_picks) - reconciled, "cfb_error": cfb_error}
 
 
 def summarize_season(season=None):

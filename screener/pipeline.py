@@ -544,7 +544,7 @@ def run_screener(props_only=False, games_only=False):
 
     game_flags = [] if props_only else run_game_screener(schedules_df, name_map, current_season, current_week)
 
-    cfb_game_flags, cfb_totals_speculative = [], []
+    cfb_game_flags, cfb_totals_speculative, cfb_error = [], [], None
     if not props_only:
         try:
             cfb_years = get_cfb_stats_years()
@@ -561,7 +561,12 @@ def run_screener(props_only=False, games_only=False):
         except Exception as e:
             # A CFB-side failure (data source down, misconfigured key, etc.) should never
             # take down the whole NFL run — degrade to "no CFB picks this run" instead.
+            # Recorded as cfb_error rather than just logged: a caught exception here is
+            # invisible to Bradley otherwise, since the run still exits successfully and
+            # sends a normal-looking email -- exactly what let CFB silently fail on every
+            # scheduled run for two days in production before anyone noticed (2026-08-23).
             logger.error(f"CFB screening failed, skipping CFB for this run: {e}")
+            cfb_error = str(e)
 
     if games_only:
         prop_flags, prop_speculative, prop_no_data, prop_coverage = [], [], [], []
@@ -574,6 +579,7 @@ def run_screener(props_only=False, games_only=False):
         "games": game_flags,
         "cfb_games": cfb_game_flags,
         "cfb_totals_speculative": cfb_totals_speculative,
+        "cfb_error": cfb_error,
         "props": prop_flags,
         "props_speculative": prop_speculative,
         "props_coverage": prop_coverage,
