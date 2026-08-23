@@ -1,0 +1,45 @@
+name: NHL Betting Screener
+
+on:
+  schedule:
+    # Every 30 minutes, all day. Actual screening only fires once a day, ~1 hour before
+    # that day's first NHL game (which varies a lot: weeknight evenings vs. weekend
+    # matinees) -- see screener/nhl_schedule_gate.py. Every other check is a cheap
+    # no-op: one NHL API call to check today's schedule, then exit immediately.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to commit the updated dashboard + ledger back to the repo
+
+jobs:
+  run-nhl-screener:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          echo "ODDS_API_KEY=${{ secrets.ODDS_API_KEY }}" >> .env
+          echo "GMAIL_ADDRESS=${{ secrets.GMAIL_ADDRESS }}" >> .env
+          echo "GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}" >> .env
+
+      - name: Check run window and screen NHL if open
+        run: python main.py --nhl-only --send
+
+      - name: Commit updated dashboard, ledger, and run marker
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html data/
+          git diff --staged --quiet || git commit -m "Update dashboard and ledger [NHL automated run]"
+          git push

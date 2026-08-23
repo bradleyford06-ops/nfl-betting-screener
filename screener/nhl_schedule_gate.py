@@ -75,14 +75,14 @@ def mark_ran_today():
         f.write(str(datetime.now(PACIFIC_TZ).date()))
 
 
-def run_window_open(lead_time_minutes=60, poll_interval_minutes=30, now=None):
+def run_window_open(lead_time_minutes=60, poll_interval_minutes=45, now=None):
     """
     True if right now is when the NHL screener should actually run: starting
-    `lead_time_minutes` before today's first game and lasting `poll_interval_minutes` —
-    matched to how often this check itself runs (see nhl_screener.yml's cron), so
-    exactly one check per day should land inside the window. Also false if we've
-    already run today, as a second, storage-based safeguard against double-firing if a
-    delayed GitHub Actions cron tick ever lands a second check inside the same window.
+    `lead_time_minutes` before today's first game and lasting `poll_interval_minutes`.
+    GitHub Actions cron checks land every 30 minutes (see nhl_screener.yml), so a window
+    of 45 gives a buffer against an occasional delayed or skipped tick — a wider window
+    only risks two checks landing inside it on rare occasions, and already_ran_today()
+    below fully prevents that from causing a double-run.
     """
     if already_ran_today():
         return False

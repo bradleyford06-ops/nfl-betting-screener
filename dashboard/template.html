@@ -201,6 +201,7 @@
 <nav class="tabs">
   <button class="tab-btn active" data-tab="upcoming">NFL</button>
   <button class="tab-btn" data-tab="cfb">College Football</button>
+  <button class="tab-btn" data-tab="nhl">NHL</button>
   <button class="tab-btn" data-tab="season">Season Performance</button>
 </nav>
 
@@ -225,6 +226,12 @@
     <div class="subhead" style="margin-top:0;">FBS spreads &amp; totals — our own opponent-adjusted power rating, validated against SP+. Spread is backtested with a real edge; totals have none (see explanation on speculative picks below), same treatment as the NFL total model.</div>
     <div class="week-pills" id="cfb-week-pills"></div>
     <div id="cfb-games-container"></div>
+  </div>
+
+  <div class="view" id="view-nhl">
+    <div class="subhead" style="margin-top:0;">Goalie-adjusted power rating for moneyline &amp; total — moneyline and total are backtested with a real edge; puck line has none (a naive "always bet the road team" strategy wins the same market most of the time, a structural quirk of hockey scoring), same speculative treatment as the NFL/CFB total models. Days are shown instead of weeks since NHL plays most days.</div>
+    <div class="week-pills" id="nhl-week-pills"></div>
+    <div id="nhl-games-container"></div>
   </div>
 
   <div class="view" id="view-season">
@@ -457,6 +464,62 @@ function renderCfbGames() {
   });
 }
 
+// ---------- NHL ----------
+let currentNhlWeekIndex = 0;
+
+function formatNhlDate(yyyymmdd) {
+  const s = String(yyyymmdd);
+  const d = new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function renderNhlWeekPills() {
+  const container = document.getElementById("nhl-week-pills");
+  container.innerHTML = "";
+  DATA.nhl_weeks.forEach((w, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = formatNhlDate(w.week);
+    if (i === currentNhlWeekIndex) btn.classList.add("active");
+    btn.addEventListener("click", () => { currentNhlWeekIndex = i; renderNhlWeekPills(); renderNhlGames(); });
+    container.appendChild(btn);
+  });
+}
+
+function renderNhlGames() {
+  const container = document.getElementById("nhl-games-container");
+  container.innerHTML = "";
+  const week = DATA.nhl_weeks[currentNhlWeekIndex];
+  if (!week || week.games.length === 0) {
+    container.innerHTML = '<div class="empty-state">No NHL picks flagged right now.</div>';
+    return;
+  }
+
+  week.games.forEach(game => {
+    const card = document.createElement("div");
+    card.className = "game-card";
+
+    const header = document.createElement("div");
+    header.className = "game-card-header";
+    header.innerHTML = `
+      <div>
+        <div class="game-matchup">${game.matchup}</div>
+        <div class="game-meta">${game.game_flags.length} pick${game.game_flags.length===1?"":"s"}</div>
+      </div>
+      <div class="badge-row">
+        <span class="badge ${edgeBadgeClass(game.max_edge, game.max_edge < 3)}">top edge ${game.max_edge.toFixed(2)}</span>
+        <span class="chevron">&#9656;</span>
+      </div>`;
+    header.addEventListener("click", () => card.classList.toggle("open"));
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "game-card-body";
+    body.appendChild(renderGameFlagsTable(game.game_flags));
+    card.appendChild(body);
+    container.appendChild(card);
+  });
+}
+
 function renderPropsTable(props) {
   const table = document.createElement("table");
   table.innerHTML = "<thead><tr><th data-sort='edge_score'>Player</th><th>Market</th><th>Side</th><th>Line</th><th data-sort='edge_score'>Edge</th><th>Source</th></tr></thead>";
@@ -552,6 +615,8 @@ renderWeekPills();
 renderGames();
 renderCfbWeekPills();
 renderCfbGames();
+renderNhlWeekPills();
+renderNhlGames();
 renderSeasonPerformance();
 </script>
 
