@@ -44,6 +44,17 @@ def send_report(results):
     return body
 
 
+def send_nhl_report(nhl_games, nhl_puckline_speculative):
+    """Format and send the NHL report email — separate from send_report since it fires
+    later in the day, at NHL's own dynamic run time rather than the fixed 9am NFL/CFB slot."""
+    from email_report.formatter import format_nhl_email
+    body = format_nhl_email(nhl_games, nhl_puckline_speculative)
+    today = datetime.now().strftime("%b %d")
+    subject = f"NHL Betting Screener — {today}"
+    send_email(subject, body)
+    return body
+
+
 def send_test_email():
     """Send a test email with fake data to verify email delivery is working."""
     fake_results = {

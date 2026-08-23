@@ -4,6 +4,7 @@ MARKET_LABELS = {
     "spread": "Spread",
     "total": "Total",
     "moneyline": "Moneyline",
+    "puckline": "Puck Line",
 }
 
 DASHBOARD_URL = "https://bradleyford06-ops.github.io/nfl-betting-screener/"
@@ -101,6 +102,51 @@ def format_email(results):
 
     lines.append("-" * 60)
     lines.append(f"Full dashboard (every week, every pick, season performance): {DASHBOARD_URL}")
+    lines.append("Generated automatically by the NFL Betting Screener.")
+    lines.append("Informational only — not a guarantee. Always bet responsibly.")
+
+    return "\n".join(lines)
+
+
+def format_nhl_email(nhl_games, nhl_puckline_speculative):
+    """
+    Build the plain-text NHL email body. Sent separately from the main NFL/CFB report,
+    since the NHL screener runs later in the day at its own dynamic time (see
+    screener/nhl_schedule_gate.py) rather than the fixed 9am NFL/CFB schedule.
+    """
+    lines = []
+    lines.append("NHL BETTING SCREENER")
+    lines.append(f"Report Date: {date.today().strftime('%A, %B %d, %Y')}")
+    lines.append(f"Full dashboard: {DASHBOARD_URL}")
+    lines.append("=" * 60)
+    lines.append("")
+
+    if not any([nhl_games, nhl_puckline_speculative]):
+        lines.append("No bets passed the screening criteria for tonight's NHL slate.")
+        lines.append(f"Check the dashboard for the full picture: {DASHBOARD_URL}")
+        return "\n".join(lines)
+
+    if nhl_games:
+        lines.append(f"NHL — MONEYLINE & TOTAL  ({len(nhl_games)} flagged)")
+        lines.append("Own opponent-adjusted power rating, goalie-form adjusted for each game's")
+        lines.append("actual (or best-guess, if not yet confirmed) starting goalie.")
+        lines.append("=" * 60)
+        lines.append("")
+        for i, game in enumerate(nhl_games, 1):
+            lines += _format_game_flag(i, game)
+
+    if nhl_puckline_speculative:
+        lines.append(f"NHL — PUCK LINE (SPECULATIVE)  ({len(nhl_puckline_speculative)} flagged)")
+        lines.append("Backtesting found this market's apparent edge is mostly a structural quirk of")
+        lines.append("hockey scoring (road underdogs cover +1.5 most of the time regardless of any")
+        lines.append("model), not proven model skill — treat these as informational, not a recommendation.")
+        lines.append("=" * 60)
+        lines.append("")
+        for i, game in enumerate(nhl_puckline_speculative, 1):
+            lines += _format_game_flag(i, game)
+
+    lines.append("-" * 60)
+    lines.append(f"Full dashboard (every night, every pick, season performance): {DASHBOARD_URL}")
     lines.append("Generated automatically by the NFL Betting Screener.")
     lines.append("Informational only — not a guarantee. Always bet responsibly.")
 

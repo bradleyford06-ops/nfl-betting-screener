@@ -123,10 +123,12 @@ def predict_matchup(ratings_df, home_team, away_team):
     }
 
 
-def margin_to_win_probability(margin):
+def margin_to_win_probability(margin, margin_std_dev=MARGIN_STD_DEV):
     """Convert a predicted point margin into a win probability using a normal-distribution
-    approximation of how NFL game margins are typically distributed."""
-    z = margin / (MARGIN_STD_DEV * math.sqrt(2))
+    approximation of how game margins are typically distributed. `margin_std_dev` defaults
+    to the NFL's own value but can be overridden by other sports (e.g. the NHL model) whose
+    game margins are distributed differently."""
+    z = margin / (margin_std_dev * math.sqrt(2))
     return 0.5 * (1 + math.erf(z))
 
 

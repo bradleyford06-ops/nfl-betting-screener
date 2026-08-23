@@ -5,11 +5,15 @@ Run: python main.py                — screen and print results
 Run: python main.py --send         — screen and send email to bradleyford5@hotmail.com
 Run: python main.py --props-only   — only screen player props
 Run: python main.py --games-only   — only screen spreads/totals/moneylines
+Run: python main.py --nhl-only     — check whether it's time for today's NHL run, and if
+                                      so, screen NHL and send its own separate email
 Run: python -m email_report.send --test — send a test email without running the screener
 
-The dashboard (docs/index.html) is only regenerated on full runs (not --props-only/
---games-only), since a partial run's results would otherwise blow away whatever the other
-half of the dashboard was showing.
+The dashboard (docs/index.html) is regenerated from the permanent ledger's currently-open
+picks (not just this run's fresh results) on every full run and every --nhl-only run that
+actually screens — see dashboard/build_data.py for why: NFL/CFB run at a fixed 9am while
+NHL runs later, at its own dynamic time, so no single run ever has every sport's results
+in memory at once.
 """
 
 import argparse
@@ -24,15 +28,68 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def regenerate_dashboard(no_data=None):
+    from screener.reconcile import summarize_season
+    from screener.ledger import get_all_picks, get_open_picks
+    from dashboard.build_data import build_dashboard_data
+    from dashboard.generate import write_dashboard
+
+    logger.info("Generating dashboard...")
+    dashboard_data = build_dashboard_data(get_open_picks(), summarize_season(), get_all_picks(), no_data=no_data or [])
+    write_dashboard(dashboard_data, "docs/index.html")
+
+
+def run_nhl_only(send):
+    """
+    Check whether right now is when the NHL screener should fire today (see
+    screener/nhl_schedule_gate.py) — this is expected to be invoked frequently
+    throughout the day by its own GitHub Actions workflow, and should do nothing on
+    every check except the one that actually lands in today's run window.
+    """
+    from screener.nhl_schedule_gate import run_window_open, mark_ran_today
+
+    if not run_window_open():
+        logger.info("Not yet time for today's NHL run.")
+        return
+
+    from screener.pipeline import run_nhl_screener, log_results_to_ledger
+    from email_report.formatter import format_nhl_email
+
+    logger.info("Running NHL screener...")
+    nhl_games, nhl_puckline_speculative = run_nhl_screener()
+    log_results_to_ledger({"nhl_games": nhl_games, "nhl_puckline_speculative": nhl_puckline_speculative})
+
+    regenerate_dashboard()
+
+    if not nhl_games and not nhl_puckline_speculative:
+        logger.warning("No NHL bets passed the screening criteria tonight.")
+
+    report = format_nhl_email(nhl_games, nhl_puckline_speculative)
+    print("\n" + report)
+
+    if send:
+        from email_report.send import send_nhl_report
+        logger.info("Sending NHL email...")
+        send_nhl_report(nhl_games, nhl_puckline_speculative)
+        logger.info("Email sent to bradleyford5@hotmail.com")
+
+    mark_ran_today()
+
+
 def main():
     parser = argparse.ArgumentParser(description="NFL Betting Screener")
     parser.add_argument("--send", action="store_true", help="Send results by email")
     parser.add_argument("--props-only", action="store_true", help="Only screen player props")
     parser.add_argument("--games-only", action="store_true", help="Only screen spreads/totals/moneylines")
+    parser.add_argument("--nhl-only", action="store_true", help="Check the NHL run-time gate, and screen NHL if it's open")
     args = parser.parse_args()
 
     from dotenv import load_dotenv
     load_dotenv()
+
+    if args.nhl_only:
+        run_nhl_only(args.send)
+        return
 
     from screener.pipeline import run_screener, log_results_to_ledger
     from screener.reconcile import reconcile_all
@@ -49,14 +106,7 @@ def main():
     log_results_to_ledger(results)
 
     if not args.props_only and not args.games_only:
-        from screener.reconcile import summarize_season
-        from screener.ledger import get_all_picks
-        from dashboard.build_data import build_dashboard_data
-        from dashboard.generate import write_dashboard
-
-        logger.info("Generating dashboard...")
-        dashboard_data = build_dashboard_data(results, summarize_season(), get_all_picks())
-        write_dashboard(dashboard_data, "docs/index.html")
+        regenerate_dashboard(no_data=results.get("props_no_data", []))
 
     if not any(results[k] for k in [
         "games", "cfb_games", "cfb_totals_speculative", "props", "props_speculative", "props_coverage", "props_no_data",
@@ -79,6 +129,7 @@ if __name__ == "__main__":
     _parser.add_argument("--send", action="store_true")
     _parser.add_argument("--props-only", action="store_true")
     _parser.add_argument("--games-only", action="store_true")
+    _parser.add_argument("--nhl-only", action="store_true")
     _parsed, _ = _parser.parse_known_args()
 
     try:

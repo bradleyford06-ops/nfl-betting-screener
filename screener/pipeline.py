@@ -4,12 +4,19 @@ from datetime import datetime
 
 from screener.fetch_stats import get_weekly_player_stats, get_schedules
 from screener.fetch_pbp import get_play_by_play
-from screener.fetch_odds import get_events, get_game_odds, get_player_props, CFB_SPORT
+from screener.fetch_odds import get_events, get_game_odds, get_player_props, CFB_SPORT, NHL_SPORT
 from screener.fetch_cfb_stats import get_cfb_schedules, get_cfb_team_name_map, to_cfb_school_name
+from screener.fetch_nhl_stats import get_nhl_schedule, get_nhl_goalie_game_logs
+from screener.nhl_team_map import to_nhl_abbr
+from screener.nhl_goalies import resolve_starting_goalies, most_used_goalie
 from screener.team_map import get_team_name_to_abbr, to_abbr
 from screener.scoring import rank_props, rank_games
 from model.power_ratings import compute_team_ratings, predict_matchup, screen_spread, screen_total
 from model.cfb_power_ratings import compute_cfb_team_ratings, predict_cfb_matchup, screen_cfb_spread, screen_cfb_total
+from model.nhl_power_ratings import (
+    compute_nhl_team_ratings, compute_goalie_ratings, predict_nhl_matchup,
+    screen_nhl_moneyline, screen_nhl_puckline, screen_nhl_total, PUCK_LINE,
+)
 from model.player_trends import (
     screen_player_prop, player_current_team, has_nfl_history,
     get_position_stat_ratings, player_adjusted_average,
@@ -148,6 +155,145 @@ def get_cfb_stats_years():
     """Which CFB seasons to pull stats for — same reasoning as get_stats_years."""
     year = datetime.now().year
     return [year - 2, year - 1, year]
+
+
+def get_nhl_current_season_year():
+    """
+    The NHL labels a season by its starting year (e.g. the 2024-25 season is '2024'),
+    and the season runs roughly October through June. Before around August each year
+    we're still in the previous season year even though the calendar year has ticked
+    over — e.g. March 2027 is still the 2026 season.
+    """
+    now = datetime.now()
+    return now.year if now.month >= 8 else now.year - 1
+
+
+def get_nhl_stats_years():
+    """Which NHL seasons to pull stats for — last 2 seasons plus the current one, same
+    reasoning as get_stats_years."""
+    current_season = get_nhl_current_season_year()
+    return [current_season - 2, current_season - 1, current_season]
+
+
+def run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs, games_window=25):
+    """
+    Screen today's NHL games (moneyline, puck line, total) against our goalie-adjusted
+    power-rating model. Puck line is kept live but routed to its own speculative section
+    — see model/nhl_power_ratings.py for why its backtest isn't trustworthy evidence of a
+    real edge (a naive "always bet the road team" strategy wins the same market most of
+    the time, a structural fact about hockey scoring, not a sign of model skill).
+
+    Unlike NFL/CFB, there's no natural "week" for a sport that plays most days of the
+    week — the ledger's "week" column is repurposed here to hold the game's calendar
+    date as an integer (YYYYMMDD), which keeps the ledger's (season, week, subject,
+    market) uniqueness meaningful for a day-based sport instead of a week-based one.
+
+    Each goalie is resolved via the saves-prop confirmation signal where available
+    (screener/nhl_goalies.py) and falls back to that team's own most-used goalie
+    recently when not yet confirmed — every returned flag records whether both
+    starters were actually confirmed, so the report can be honest about it.
+    """
+    team_ratings = compute_nhl_team_ratings(nhl_schedule_df, games_window)
+    goalie_ratings = compute_goalie_ratings(nhl_goalie_logs, games_window)
+
+    events = get_events(sport=NHL_SPORT)
+    event_id_by_teams = {(e["home_team"], e["away_team"]): e["id"] for e in events}
+    games = get_game_odds(markets="h2h,spreads,totals", sport=NHL_SPORT)
+
+    flags = []
+    speculative_flags = []
+
+    for game in games:
+        home_full, away_full = game["home_team"], game["away_team"]
+        home_abbr, away_abbr = to_nhl_abbr(home_full), to_nhl_abbr(away_full)
+
+        commence_time = game.get("commence_time")
+        if not commence_time:
+            continue
+        game_date = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+        season = game_date.year if game_date.month >= 8 else game_date.year - 1
+        date_key = int(game_date.strftime("%Y%m%d"))
+
+        event_id = event_id_by_teams.get((home_full, away_full))
+        if event_id is not None:
+            home_goalie_id, home_confirmed, away_goalie_id, away_confirmed = resolve_starting_goalies(
+                event_id, home_abbr, away_abbr, goalie_ratings
+            )
+        else:
+            logger.debug(f"No matching odds event for {away_full} @ {home_full} — using best-guess goalies")
+            home_goalie_id = most_used_goalie(goalie_ratings, home_abbr)
+            away_goalie_id = most_used_goalie(goalie_ratings, away_abbr)
+            home_confirmed = away_confirmed = False
+
+        prediction = predict_nhl_matchup(team_ratings, goalie_ratings, home_abbr, away_abbr, home_goalie_id, away_goalie_id)
+        if prediction is None:
+            logger.debug(f"Skipping {away_full} @ {home_full} — not enough NHL rating data yet")
+            continue
+
+        home_ml, away_ml, home_puck_odds, away_puck_odds, total_lines, total_prices = None, None, None, None, [], []
+        for bookmaker in game.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                if market["key"] == "h2h":
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == home_full:
+                            home_ml = outcome["price"]
+                        elif outcome["name"] == away_full:
+                            away_ml = outcome["price"]
+                elif market["key"] == "spreads":
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == home_full:
+                            home_puck_odds = outcome["price"]
+                        elif outcome["name"] == away_full:
+                            away_puck_odds = outcome["price"]
+                elif market["key"] == "totals":
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == "Over":
+                            total_lines.append(outcome["point"])
+                            total_prices.append(outcome["price"])
+
+        goalies_confirmed = home_confirmed and away_confirmed
+        goalie_caveat = (
+            "" if goalies_confirmed else
+            " (starting goalies not yet confirmed — using each team's recent form as a placeholder.)"
+        )
+        game_context = {
+            "home_team": home_abbr, "away_team": away_abbr, "commence_time": commence_time,
+            "season": season, "week": date_key,
+            "goalies_confirmed": goalies_confirmed,
+        }
+
+        if home_ml is not None and away_ml is not None:
+            flag = screen_nhl_moneyline(prediction, home_ml, away_ml)
+            if flag:
+                flag["explanation"] += goalie_caveat
+                flag["price"] = flag["market_odds"]
+                flags.append({**flag, **game_context})
+
+        if home_puck_odds is not None and away_puck_odds is not None:
+            flag = screen_nhl_puckline(prediction, home_puck_odds, away_puck_odds)
+            if flag:
+                flag["explanation"] += goalie_caveat
+                flag["price"] = flag["market_odds"]
+                flag["market_line"] = PUCK_LINE
+                speculative_flags.append({**flag, **game_context})
+
+        if total_lines:
+            flag = screen_nhl_total(prediction, sum(total_lines) / len(total_lines))
+            if flag:
+                flag["price"] = sum(total_prices) / len(total_prices)
+                flag["explanation"] += goalie_caveat
+                flags.append({**flag, **game_context})
+
+    return rank_games(flags), rank_games(speculative_flags)
+
+
+def run_nhl_screener():
+    """Run the NHL portion of the screener on its own — see screener/nhl_schedule_gate.py
+    for why this runs on its own dynamic schedule instead of the fixed 9am NFL/CFB time."""
+    nhl_years = get_nhl_stats_years()
+    nhl_schedule_df = get_nhl_schedule(nhl_years)
+    nhl_goalie_logs = get_nhl_goalie_game_logs(nhl_years)
+    return run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs)
 
 
 def run_game_screener(schedules_df, name_map, current_season, current_week, markets="spreads,totals"):
@@ -463,6 +609,7 @@ def log_results_to_ledger(results):
             away_team=flag.get("away_team"),
             commence_time=flag.get("commence_time"),
             explanation=flag.get("explanation"),
+            small_sample=flag.get("small_sample", False),
         )
 
     for flag in results.get("games", []):
@@ -471,6 +618,10 @@ def log_results_to_ledger(results):
         log_flag(flag, f"cfb_{flag['market']}", f"{flag['away_team']} @ {flag['home_team']}")
     for flag in results.get("cfb_totals_speculative", []):
         log_flag(flag, f"cfb_{flag['market']}_speculative", f"{flag['away_team']} @ {flag['home_team']}")
+    for flag in results.get("nhl_games", []):
+        log_flag(flag, f"nhl_{flag['market']}", f"{flag['away_team']} @ {flag['home_team']}")
+    for flag in results.get("nhl_puckline_speculative", []):
+        log_flag(flag, f"nhl_{flag['market']}_speculative", f"{flag['away_team']} @ {flag['home_team']}")
     for flag in results.get("props", []):
         log_flag(flag, "props_trend", flag["player"])
     for flag in results.get("props_speculative", []):

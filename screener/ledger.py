@@ -40,12 +40,17 @@ def get_connection():
             UNIQUE(strategy, season, week, subject, market)
         )
     """)
+    try:
+        conn.execute("ALTER TABLE picks ADD COLUMN small_sample INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # column already exists — SQLite has no "ADD COLUMN IF NOT EXISTS"
     conn.commit()
     return conn
 
 
 def record_pick(strategy, season, week, subject, market, side, line, edge_score, price=None,
-                 opponent=None, home_team=None, away_team=None, commence_time=None, explanation=None):
+                 opponent=None, home_team=None, away_team=None, commence_time=None, explanation=None,
+                 small_sample=False):
     """
     Log one flagged pick, or update it if we've already logged this exact market for this
     subject this week. Upserts on (strategy, season, week, subject, market) — a pick flagged
@@ -57,9 +62,9 @@ def record_pick(strategy, season, week, subject, market, side, line, edge_score,
     conn = get_connection()
     conn.execute("""
         INSERT INTO picks (strategy, season, week, subject, market, side, line, price, edge_score,
-                            opponent, home_team, away_team, commence_time, explanation,
+                            opponent, home_team, away_team, commence_time, explanation, small_sample,
                             first_flagged_at, last_seen_at, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
         ON CONFLICT(strategy, season, week, subject, market) DO UPDATE SET
             side=excluded.side,
             line=excluded.line,
@@ -70,9 +75,10 @@ def record_pick(strategy, season, week, subject, market, side, line, edge_score,
             away_team=excluded.away_team,
             commence_time=excluded.commence_time,
             explanation=excluded.explanation,
+            small_sample=excluded.small_sample,
             last_seen_at=excluded.last_seen_at
     """, (strategy, season, week, subject, market, side, line, price, edge_score,
-          opponent, home_team, away_team, commence_time, explanation, now, now))
+          opponent, home_team, away_team, commence_time, explanation, int(small_sample), now, now))
     conn.commit()
     conn.close()
 
