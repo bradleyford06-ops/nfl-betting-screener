@@ -202,6 +202,7 @@
   <button class="tab-btn active" data-tab="upcoming">NFL</button>
   <button class="tab-btn" data-tab="cfb">College Football</button>
   <button class="tab-btn" data-tab="nhl">NHL</button>
+  <button class="tab-btn" data-tab="mlb">MLB</button>
   <button class="tab-btn" data-tab="season">Season Performance</button>
 </nav>
 
@@ -232,6 +233,12 @@
     <div class="subhead" style="margin-top:0;">Goalie-adjusted power rating for moneyline &amp; total — moneyline and total are backtested with a real edge; puck line has none (a naive "always bet the road team" strategy wins the same market most of the time, a structural quirk of hockey scoring), same speculative treatment as the NFL/CFB total models. Days are shown instead of weeks since NHL plays most days.</div>
     <div class="week-pills" id="nhl-week-pills"></div>
     <div id="nhl-games-container"></div>
+  </div>
+
+  <div class="view" id="view-mlb">
+    <div class="subhead" style="margin-top:0;">Pitcher- and park-adjusted power rating for run line — the strongest backtested edge found in this project so far (2018-2021: 56.5% win rate, +13.9% ROI at the live threshold). Moneyline and total have no proven edge, same speculative treatment as the NFL/CFB total models. Days are shown instead of weeks since MLB plays most days.</div>
+    <div class="week-pills" id="mlb-week-pills"></div>
+    <div id="mlb-games-container"></div>
   </div>
 
   <div class="view" id="view-season">
@@ -467,7 +474,7 @@ function renderCfbGames() {
 // ---------- NHL ----------
 let currentNhlWeekIndex = 0;
 
-function formatNhlDate(yyyymmdd) {
+function formatYyyymmdd(yyyymmdd) {
   const s = String(yyyymmdd);
   const d = new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
@@ -478,7 +485,7 @@ function renderNhlWeekPills() {
   container.innerHTML = "";
   DATA.nhl_weeks.forEach((w, i) => {
     const btn = document.createElement("button");
-    btn.textContent = formatNhlDate(w.week);
+    btn.textContent = formatYyyymmdd(w.week);
     if (i === currentNhlWeekIndex) btn.classList.add("active");
     btn.addEventListener("click", () => { currentNhlWeekIndex = i; renderNhlWeekPills(); renderNhlGames(); });
     container.appendChild(btn);
@@ -491,6 +498,56 @@ function renderNhlGames() {
   const week = DATA.nhl_weeks[currentNhlWeekIndex];
   if (!week || week.games.length === 0) {
     container.innerHTML = '<div class="empty-state">No NHL picks flagged right now.</div>';
+    return;
+  }
+
+  week.games.forEach(game => {
+    const card = document.createElement("div");
+    card.className = "game-card";
+
+    const header = document.createElement("div");
+    header.className = "game-card-header";
+    header.innerHTML = `
+      <div>
+        <div class="game-matchup">${game.matchup}</div>
+        <div class="game-meta">${game.game_flags.length} pick${game.game_flags.length===1?"":"s"}</div>
+      </div>
+      <div class="badge-row">
+        <span class="badge ${edgeBadgeClass(game.max_edge, game.max_edge < 3)}">top edge ${game.max_edge.toFixed(2)}</span>
+        <span class="chevron">&#9656;</span>
+      </div>`;
+    header.addEventListener("click", () => card.classList.toggle("open"));
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "game-card-body";
+    body.appendChild(renderGameFlagsTable(game.game_flags));
+    card.appendChild(body);
+    container.appendChild(card);
+  });
+}
+
+// ---------- MLB ----------
+let currentMlbWeekIndex = 0;
+
+function renderMlbWeekPills() {
+  const container = document.getElementById("mlb-week-pills");
+  container.innerHTML = "";
+  DATA.mlb_weeks.forEach((w, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = formatYyyymmdd(w.week);
+    if (i === currentMlbWeekIndex) btn.classList.add("active");
+    btn.addEventListener("click", () => { currentMlbWeekIndex = i; renderMlbWeekPills(); renderMlbGames(); });
+    container.appendChild(btn);
+  });
+}
+
+function renderMlbGames() {
+  const container = document.getElementById("mlb-games-container");
+  container.innerHTML = "";
+  const week = DATA.mlb_weeks[currentMlbWeekIndex];
+  if (!week || week.games.length === 0) {
+    container.innerHTML = '<div class="empty-state">No MLB picks flagged right now.</div>';
     return;
   }
 
@@ -580,6 +637,9 @@ const STRATEGY_LABELS = {
   nhl_moneyline: "NHL Moneyline",
   nhl_total: "NHL Total",
   nhl_puckline_speculative: "NHL Puck Line (Speculative)",
+  mlb_runline: "MLB Run Line",
+  mlb_moneyline_speculative: "MLB Moneyline (Speculative)",
+  mlb_total_speculative: "MLB Total (Speculative)",
 };
 
 function strategyLabel(strategy) {
@@ -634,6 +694,8 @@ renderCfbWeekPills();
 renderCfbGames();
 renderNhlWeekPills();
 renderNhlGames();
+renderMlbWeekPills();
+renderMlbGames();
 renderSeasonPerformance();
 </script>
 

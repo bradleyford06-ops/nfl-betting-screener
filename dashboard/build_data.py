@@ -11,7 +11,7 @@ instead of the last run to fire wiping out the others' picks."""
 
 from datetime import datetime, timedelta, timezone
 
-GAME_MARKET_LABELS = {"spread": "Spread", "total": "Total", "moneyline": "Moneyline", "puckline": "Puck Line"}
+GAME_MARKET_LABELS = {"spread": "Spread", "total": "Total", "moneyline": "Moneyline", "puckline": "Puck Line", "runline": "Run Line"}
 
 # An "open" ledger pick isn't necessarily current — before the 2026-08-21 week-filter fix,
 # every run flagged the entire rest of the season at once, and those future-week picks sit
@@ -202,6 +202,13 @@ def build_nhl_week_data(open_picks):
     return _build_speculative_week_data(open_picks, "nhl_")
 
 
+def build_mlb_week_data(open_picks):
+    """MLB run-line + speculative moneyline/total picks, grouped by (season, week) then
+    matchup — "week" here is repurposed to hold the game's calendar date (YYYYMMDD)
+    rather than a real week number, same reasoning as NHL (MLB plays most days too)."""
+    return _build_speculative_week_data(open_picks, "mlb_")
+
+
 def build_dashboard_data(open_picks, season_summary, all_picks, no_data=None):
     """Top-level payload embedded in the dashboard HTML."""
     fresh_picks = _drop_stale_picks(open_picks)
@@ -210,6 +217,7 @@ def build_dashboard_data(open_picks, season_summary, all_picks, no_data=None):
         "weeks": build_this_week_data(fresh_picks, no_data),
         "cfb_weeks": build_cfb_week_data(fresh_picks),
         "nhl_weeks": build_nhl_week_data(fresh_picks),
+        "mlb_weeks": build_mlb_week_data(fresh_picks),
         "season_performance": season_summary,
         "recent_picks": [p for p in all_picks if p["status"] != "open"][-100:],
     }

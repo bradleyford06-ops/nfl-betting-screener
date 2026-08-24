@@ -111,6 +111,10 @@ def main():
         from email_report.error_alert import send_partial_failure_alert
         logger.info("Sending CFB screening partial-failure alert...")
         send_partial_failure_alert("CFB screening", results["cfb_error"])
+    if results.get("mlb_error") and args.send:
+        from email_report.error_alert import send_partial_failure_alert
+        logger.info("Sending MLB screening partial-failure alert...")
+        send_partial_failure_alert("MLB screening", results["mlb_error"])
 
     log_results_to_ledger(results)
 
@@ -118,7 +122,7 @@ def main():
         regenerate_dashboard(no_data=results.get("props_no_data", []))
 
     if not any(results[k] for k in [
-        "games", "cfb_games", "cfb_totals_speculative", "props", "props_speculative", "props_coverage", "props_no_data",
+        "games", "cfb_games", "cfb_totals_speculative", "mlb_games", "mlb_speculative", "props", "props_speculative", "props_coverage", "props_no_data",
     ]):
         logger.warning("No bets passed the screening criteria today.")
         sys.exit(0)

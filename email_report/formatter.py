@@ -5,6 +5,7 @@ MARKET_LABELS = {
     "total": "Total",
     "moneyline": "Moneyline",
     "puckline": "Puck Line",
+    "runline": "Run Line",
 }
 
 DASHBOARD_URL = "https://bradleyford06-ops.github.io/nfl-betting-screener/"
@@ -24,12 +25,14 @@ def format_email(results):
     games = results.get("games", [])
     cfb_games = results.get("cfb_games", [])
     cfb_totals_speculative = results.get("cfb_totals_speculative", [])
+    mlb_games = results.get("mlb_games", [])
+    mlb_speculative = results.get("mlb_speculative", [])
     props = results.get("props", [])
     props_speculative = results.get("props_speculative", [])
     props_coverage = results.get("props_coverage", [])
     props_no_data = results.get("props_no_data", [])
 
-    if not any([games, cfb_games, cfb_totals_speculative, props, props_speculative, props_coverage, props_no_data]):
+    if not any([games, cfb_games, cfb_totals_speculative, mlb_games, mlb_speculative, props, props_speculative, props_coverage, props_no_data]):
         lines.append("No bets passed the screening criteria for this run.")
         lines.append(f"Check the dashboard for the full picture: {DASHBOARD_URL}")
         return "\n".join(lines)
@@ -57,6 +60,25 @@ def format_email(results):
         lines.append("=" * 60)
         lines.append("")
         for i, game in enumerate(cfb_totals_speculative, 1):
+            lines += _format_game_flag(i, game)
+
+    if mlb_games:
+        lines.append(f"MLB — RUN LINE  ({len(mlb_games)} flagged)")
+        lines.append("Our own opponent-adjusted power rating, pitcher-form and park-factor")
+        lines.append("adjusted. Backtested with a real edge (2018-2021, 56.5% win rate, +13.9% ROI")
+        lines.append("at the live threshold) — the strongest signal found in this project so far.")
+        lines.append("=" * 60)
+        lines.append("")
+        for i, game in enumerate(mlb_games, 1):
+            lines += _format_game_flag(i, game)
+
+    if mlb_speculative:
+        lines.append(f"MLB — MONEYLINE & TOTAL (SPECULATIVE)  ({len(mlb_speculative)} flagged)")
+        lines.append("Backtesting found no proven edge for MLB moneyline or totals — kept visible,")
+        lines.append("but treat these as informational, not a recommendation.")
+        lines.append("=" * 60)
+        lines.append("")
+        for i, game in enumerate(mlb_speculative, 1):
             lines += _format_game_flag(i, game)
 
     if props:

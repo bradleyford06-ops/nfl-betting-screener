@@ -4,9 +4,10 @@ from datetime import datetime
 
 from screener.fetch_stats import get_weekly_player_stats, get_schedules
 from screener.fetch_pbp import get_play_by_play
-from screener.fetch_odds import get_events, get_game_odds, get_player_props, CFB_SPORT, NHL_SPORT
+from screener.fetch_odds import get_events, get_game_odds, get_player_props, CFB_SPORT, NHL_SPORT, MLB_SPORT
 from screener.fetch_cfb_stats import get_cfb_schedules, get_cfb_team_name_map, to_cfb_school_name
 from screener.fetch_nhl_stats import get_nhl_schedule, get_nhl_goalie_game_logs
+from screener.fetch_mlb_stats import get_mlb_schedule, get_pitcher_game_logs_for_schedule
 from screener.nhl_team_map import to_nhl_abbr
 from screener.nhl_goalies import resolve_starting_goalies, most_used_goalie
 from screener.team_map import get_team_name_to_abbr, to_abbr
@@ -16,6 +17,10 @@ from model.cfb_power_ratings import compute_cfb_team_ratings, predict_cfb_matchu
 from model.nhl_power_ratings import (
     compute_nhl_team_ratings, compute_goalie_ratings, predict_nhl_matchup,
     screen_nhl_moneyline, screen_nhl_puckline, screen_nhl_total, PUCK_LINE,
+)
+from model.mlb_power_ratings import (
+    compute_mlb_team_ratings, compute_park_factors, compute_pitcher_ratings, predict_mlb_matchup,
+    screen_mlb_moneyline, screen_mlb_runline, screen_mlb_total, RUN_LINE,
 )
 from model.player_trends import (
     screen_player_prop, player_current_team, has_nfl_history,
@@ -296,6 +301,134 @@ def run_nhl_screener():
     return run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs)
 
 
+def get_mlb_stats_years():
+    """Which MLB seasons to pull stats for. The season runs within a single calendar
+    year (unlike NHL/NFL, which straddle two), so last year plus the current one is
+    enough to build ratings even very early in a new season."""
+    year = datetime.now().year
+    return [year - 1, year]
+
+
+def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window=8):
+    """
+    Screen today's/tomorrow's MLB games (moneyline, run line, total) against our
+    pitcher- and park-adjusted power-rating model. Run line has a real backtested edge
+    (see backtest/run_mlb_backtest.py); moneyline and total do not, so their flags are
+    kept separate as speculative rather than mixed into the main results — same
+    treatment the NFL/CFB total models get.
+
+    Unlike NHL, MLB's own schedule API already publishes probable starting pitchers
+    days ahead, so there's no goalie-style confirmation problem to work around — the
+    schedule's own home_pitcher_id/away_pitcher_id is used directly.
+    """
+    team_ratings = compute_mlb_team_ratings(mlb_schedule_df, games_window)
+    park_factors, _ = compute_park_factors(mlb_schedule_df)
+    completed = mlb_schedule_df.dropna(subset=["home_score", "away_score"])
+    pitcher_logs = get_pitcher_game_logs_for_schedule(completed)
+    pitcher_ratings, _ = compute_pitcher_ratings(pitcher_logs, pitcher_games_window)
+
+    upcoming = mlb_schedule_df[mlb_schedule_df["home_score"].isna()]
+    schedule_by_matchup = {
+        (row["home_team"], row["away_team"], row["game_date"]): row
+        for _, row in upcoming.iterrows()
+    }
+
+    games = get_game_odds(markets="h2h,spreads,totals", sport=MLB_SPORT)
+    flags = []
+    speculative_flags = []
+
+    for game in games:
+        home_full, away_full = game["home_team"], game["away_team"]
+        commence_time = game.get("commence_time")
+        if not commence_time:
+            continue
+        game_date = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+
+        schedule_row = schedule_by_matchup.get((home_full, away_full, game_date))
+        if schedule_row is None:
+            logger.debug(f"No matching MLB schedule entry for {away_full} @ {home_full} on {game_date}")
+            continue
+
+        home_pitcher_id = schedule_row.get("home_pitcher_id")
+        away_pitcher_id = schedule_row.get("away_pitcher_id")
+        pitchers_confirmed = pd.notna(home_pitcher_id) and pd.notna(away_pitcher_id)
+
+        prediction = predict_mlb_matchup(
+            team_ratings, pitcher_ratings, park_factors, home_full, away_full,
+            venue_name=schedule_row.get("venue_name"),
+            home_pitcher_id=int(home_pitcher_id) if pd.notna(home_pitcher_id) else None,
+            away_pitcher_id=int(away_pitcher_id) if pd.notna(away_pitcher_id) else None,
+        )
+        if prediction is None:
+            logger.debug(f"Skipping {away_full} @ {home_full} — not enough MLB rating data yet")
+            continue
+
+        home_ml, away_ml, home_rl_odds, away_rl_odds, total_lines, total_prices = None, None, None, None, [], []
+        for bookmaker in game.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                if market["key"] == "h2h":
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == home_full:
+                            home_ml = outcome["price"]
+                        elif outcome["name"] == away_full:
+                            away_ml = outcome["price"]
+                elif market["key"] == "spreads":
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == home_full:
+                            home_rl_odds = outcome["price"]
+                        elif outcome["name"] == away_full:
+                            away_rl_odds = outcome["price"]
+                elif market["key"] == "totals":
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == "Over":
+                            total_lines.append(outcome["point"])
+                            total_prices.append(outcome["price"])
+
+        pitcher_caveat = (
+            "" if pitchers_confirmed else
+            " (probable starters not yet announced for this game — using each team's recent rotation form as a placeholder.)"
+        )
+        game_context = {
+            "home_team": home_full, "away_team": away_full, "commence_time": commence_time,
+            "season": schedule_row["season"], "week": int(game_date.replace("-", "")),
+            "pitchers_confirmed": pitchers_confirmed,
+        }
+
+        if home_ml is not None and away_ml is not None:
+            flag = screen_mlb_moneyline(prediction, home_ml, away_ml)
+            if flag:
+                flag["explanation"] += pitcher_caveat
+                flag["price"] = flag["market_odds"]
+                speculative_flags.append({**flag, **game_context})
+
+        if home_rl_odds is not None and away_rl_odds is not None:
+            flag = screen_mlb_runline(prediction, home_rl_odds, away_rl_odds)
+            if flag:
+                flag["explanation"] += pitcher_caveat
+                flag["price"] = flag["market_odds"]
+                flag["market_line"] = RUN_LINE
+                flags.append({**flag, **game_context})
+
+        if total_lines:
+            flag = screen_mlb_total(prediction, sum(total_lines) / len(total_lines))
+            if flag:
+                flag["price"] = sum(total_prices) / len(total_prices)
+                flag["explanation"] += pitcher_caveat
+                speculative_flags.append({**flag, **game_context})
+
+    return rank_games(flags), rank_games(speculative_flags)
+
+
+def run_mlb_screener():
+    """Run the MLB portion of the screener on its own entry point, mirroring the CFB/NHL
+    pattern — but on the same fixed 9am schedule as NFL/CFB, since MLB's probable
+    starters are announced well ahead of that time (unlike NHL's same-day goalie
+    confirmations), so no dynamic scheduling is needed here."""
+    mlb_years = get_mlb_stats_years()
+    mlb_schedule_df = get_mlb_schedule(mlb_years)
+    return run_mlb_game_screener(mlb_schedule_df)
+
+
 def run_game_screener(schedules_df, name_map, current_season, current_week, markets="spreads,totals"):
     """
     Screen the upcoming week's NFL games' spread and total against our power-rating model.
@@ -568,6 +701,17 @@ def run_screener(props_only=False, games_only=False):
             logger.error(f"CFB screening failed, skipping CFB for this run: {e}")
             cfb_error = str(e)
 
+    mlb_flags, mlb_speculative, mlb_error = [], [], None
+    if not props_only:
+        try:
+            mlb_flags, mlb_speculative = run_mlb_screener()
+        except Exception as e:
+            # Same isolation reasoning as the CFB block above -- an MLB-side failure
+            # should never take down the NFL run, but must still be visible rather than
+            # just logged (see log_results_to_ledger's cfb_error handling in main.py).
+            logger.error(f"MLB screening failed, skipping MLB for this run: {e}")
+            mlb_error = str(e)
+
     if games_only:
         prop_flags, prop_speculative, prop_no_data, prop_coverage = [], [], [], []
     else:
@@ -580,6 +724,9 @@ def run_screener(props_only=False, games_only=False):
         "cfb_games": cfb_game_flags,
         "cfb_totals_speculative": cfb_totals_speculative,
         "cfb_error": cfb_error,
+        "mlb_games": mlb_flags,
+        "mlb_speculative": mlb_speculative,
+        "mlb_error": mlb_error,
         "props": prop_flags,
         "props_speculative": prop_speculative,
         "props_coverage": prop_coverage,
@@ -628,6 +775,10 @@ def log_results_to_ledger(results):
         log_flag(flag, f"nhl_{flag['market']}", f"{flag['away_team']} @ {flag['home_team']}")
     for flag in results.get("nhl_puckline_speculative", []):
         log_flag(flag, f"nhl_{flag['market']}_speculative", f"{flag['away_team']} @ {flag['home_team']}")
+    for flag in results.get("mlb_games", []):
+        log_flag(flag, f"mlb_{flag['market']}", f"{flag['away_team']} @ {flag['home_team']}")
+    for flag in results.get("mlb_speculative", []):
+        log_flag(flag, f"mlb_{flag['market']}_speculative", f"{flag['away_team']} @ {flag['home_team']}")
     for flag in results.get("props", []):
         log_flag(flag, "props_trend", flag["player"])
     for flag in results.get("props_speculative", []):

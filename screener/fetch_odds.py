@@ -9,6 +9,7 @@ BASE_URL = "https://api.the-odds-api.com/v4"
 SPORT = "americanfootball_nfl"
 CFB_SPORT = "americanfootball_ncaaf"
 NHL_SPORT = "icehockey_nhl"
+MLB_SPORT = "baseball_mlb"
 ODDS_CACHE_TTL_HOURS = 6  # lines move during the week, but we only run a few times a week
 
 PROP_MARKETS = [
