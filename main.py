@@ -103,6 +103,10 @@ def main():
         from email_report.error_alert import send_partial_failure_alert
         logger.info("Sending CFB reconciliation partial-failure alert...")
         send_partial_failure_alert("CFB reconciliation", recon_summary["cfb_error"])
+    if recon_summary.get("mlb_error") and args.send:
+        from email_report.error_alert import send_partial_failure_alert
+        logger.info("Sending MLB reconciliation partial-failure alert...")
+        send_partial_failure_alert("MLB reconciliation", recon_summary["mlb_error"])
 
     logger.info("Running screener...")
     results = run_screener(props_only=args.props_only, games_only=args.games_only)

@@ -4,11 +4,12 @@ import pandas as pd
 from screener.ledger import get_open_picks, mark_result
 from screener.fetch_stats import get_schedules, get_weekly_player_stats
 from screener.fetch_cfb_stats import get_cfb_schedules
+from screener.fetch_mlb_stats import get_mlb_schedule
 from model.player_trends import PROP_STAT_MAP
 
 logger = logging.getLogger(__name__)
 
-GAME_MARKETS = {"spread", "total"}
+GAME_MARKETS = {"spread", "total", "moneyline", "runline"}
 
 
 def american_odds_profit(odds, stake=1.0):
@@ -57,6 +58,21 @@ def grade_game_pick(pick, home_score, away_score):
         if pick["side"] == "Over":
             return "won" if actual_total > pick["line"] else "lost"
         return "won" if actual_total < pick["line"] else "lost"
+
+    if pick["market"] == "moneyline":
+        if home_score == away_score:
+            return "push"  # essentially never happens in a completed MLB game, handled defensively anyway
+        winner = pick["home_team"] if home_score > away_score else pick["away_team"]
+        return "won" if pick["side"] == winner else "lost"
+
+    if pick["market"] == "runline":
+        # The run line is always +/-1.5 (see model/mlb_power_ratings.py's RUN_LINE) --
+        # margins are integers, so home/away covering are exact complements, same
+        # reasoning as the NHL puck-line grading fix.
+        home_margin = home_score - away_score
+        if pick["side"].startswith(pick["home_team"]):
+            return "won" if home_margin > 1.5 else "lost"
+        return "won" if home_margin < 1.5 else "lost"
 
     return None
 
@@ -117,8 +133,27 @@ def reconcile_all():
         cfb_schedules_df = None
         cfb_error = str(e)
 
-    if schedules_df is None and cfb_schedules_df is None:
-        return {"reconciled": 0, "still_open": len(open_picks), "cfb_error": cfb_error}
+    mlb_error = None
+    try:
+        mlb_schedules_df = get_mlb_schedule(seasons_needed)
+        # MLB picks use the game's calendar date (YYYYMMDD) as "week" instead of a real
+        # week number (see run_mlb_game_screener in screener/pipeline.py) -- add the same
+        # encoding here so _find_game_result's generic season/week/team match works.
+        mlb_schedules_df = mlb_schedules_df.assign(
+            week=mlb_schedules_df["game_date"].str.replace("-", "", regex=False).astype(int)
+        )
+    except RuntimeError:
+        logger.info("No MLB schedule data available yet — skipping MLB game reconciliation.")
+        mlb_schedules_df = None
+    except Exception as e:
+        # Same reasoning as the CFB block above -- a real failure (not just "not
+        # published yet") needs to be visible, not just logged and skipped.
+        logger.error(f"MLB schedule fetch failed, skipping MLB game reconciliation: {e}")
+        mlb_schedules_df = None
+        mlb_error = str(e)
+
+    if schedules_df is None and cfb_schedules_df is None and mlb_schedules_df is None:
+        return {"reconciled": 0, "still_open": len(open_picks), "cfb_error": cfb_error, "mlb_error": mlb_error}
 
     try:
         weekly_df = get_weekly_player_stats(seasons_needed)
@@ -134,7 +169,14 @@ def reconcile_all():
             continue
 
         if pick["market"] in GAME_MARKETS:
-            active_schedule = cfb_schedules_df if pick["strategy"].startswith("cfb_") else schedules_df
+            if pick["strategy"].startswith("cfb_"):
+                active_schedule = cfb_schedules_df
+            elif pick["strategy"].startswith("mlb_"):
+                active_schedule = mlb_schedules_df
+            elif pick["strategy"].startswith("nhl_"):
+                active_schedule = None  # NHL reconciliation isn't built yet
+            else:
+                active_schedule = schedules_df
             if active_schedule is None:
                 continue
             result = _find_game_result(active_schedule, pick["season"], pick["week"], pick["home_team"], pick["away_team"])
@@ -142,7 +184,7 @@ def reconcile_all():
                 continue
             home_score, away_score = result
             outcome = grade_game_pick(pick, home_score, away_score)
-            actual_value = home_score - away_score if pick["market"] == "spread" else home_score + away_score
+            actual_value = home_score + away_score if pick["market"] == "total" else home_score - away_score
         else:
             if weekly_df is None:
                 continue
@@ -159,7 +201,7 @@ def reconcile_all():
         mark_result(pick["id"], outcome, actual_value)
         reconciled += 1
 
-    return {"reconciled": reconciled, "still_open": len(open_picks) - reconciled, "cfb_error": cfb_error}
+    return {"reconciled": reconciled, "still_open": len(open_picks) - reconciled, "cfb_error": cfb_error, "mlb_error": mlb_error}
 
 
 def summarize_season(season=None):
