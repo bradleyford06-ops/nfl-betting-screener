@@ -59,8 +59,11 @@ def run_nhl_backtest(burn_in_years, test_years, games_window=25):
     """
     Walk forward through real historical NHL seasons: for each test game, build team and
     goalie ratings using only data available before that game's date, generate a
-    prediction using the two teams' actual starting goalies for that game, apply the live
-    screening thresholds, and grade any flagged bets against the real historical odds.
+    prediction using the two teams' actual starting goalies for that game, and grade
+    every game's edge (threshold-free — every game gets a flag with its real edge_score)
+    against the real historical odds. Filtering by a specific edge threshold happens
+    afterward in summarize_results, so one backtest run supports a full threshold sweep
+    or per-edge-bucket analysis, same pattern as the CFB/NFL backtests.
     """
     all_years = sorted(set(burn_in_years) | set(test_years))
     schedule = get_nhl_schedule(all_years).dropna(subset=["home_score", "away_score"])
@@ -104,9 +107,9 @@ def run_nhl_backtest(burn_in_years, test_years, games_window=25):
         )
 
         candidate_flags = [
-            screen_nhl_moneyline(prediction, home_ml, away_ml),
-            screen_nhl_puckline(prediction, ASSUMED_PUCKLINE_ODDS, ASSUMED_PUCKLINE_ODDS),
-            screen_nhl_total(prediction, odds_row["over_under"]),
+            screen_nhl_moneyline(prediction, home_ml, away_ml, edge_threshold=0),
+            screen_nhl_puckline(prediction, ASSUMED_PUCKLINE_ODDS, ASSUMED_PUCKLINE_ODDS, edge_threshold=0),
+            screen_nhl_total(prediction, odds_row["over_under"], edge_threshold=0),
         ]
 
         for flag in candidate_flags:
@@ -121,6 +124,9 @@ def run_nhl_backtest(burn_in_years, test_years, games_window=25):
                 "market": flag["market"],
                 "side": flag["side"],
                 "edge_score": flag["edge_score"],
+                "odds": odds_used,
+                "model_prob": flag.get("model_win_prob", flag.get("model_cover_prob")),
+                "market_prob": flag.get("market_implied_prob"),
                 "outcome": outcome,
                 "profit_units": profit,
             })

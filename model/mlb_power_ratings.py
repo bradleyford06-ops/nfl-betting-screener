@@ -159,7 +159,7 @@ def predict_mlb_matchup(team_ratings, pitcher_ratings, park_factors, home_team, 
     }
 
 
-def screen_mlb_moneyline(prediction, home_odds, away_odds):
+def screen_mlb_moneyline(prediction, home_odds, away_odds, edge_threshold=MONEYLINE_EDGE_THRESHOLD):
     """Flag a moneyline bet if our model's win probability disagrees with the market's
     (vig-removed) implied probability by enough to matter. Same logic as the NFL/NHL models."""
     home_implied = american_odds_to_implied_prob(home_odds)
@@ -167,7 +167,7 @@ def screen_mlb_moneyline(prediction, home_odds, away_odds):
     home_fair, away_fair = devig_two_way(home_implied, away_implied)
 
     home_edge = prediction["home_win_prob"] - home_fair
-    if abs(home_edge) < MONEYLINE_EDGE_THRESHOLD:
+    if abs(home_edge) < edge_threshold:
         return None
 
     if home_edge > 0:
@@ -189,7 +189,7 @@ def screen_mlb_moneyline(prediction, home_odds, away_odds):
     }
 
 
-def screen_mlb_runline(prediction, home_runline_odds, away_runline_odds):
+def screen_mlb_runline(prediction, home_runline_odds, away_runline_odds, edge_threshold=RUNLINE_EDGE_THRESHOLD):
     """
     Flag a run-line bet (the fixed +/-1.5 run spread) if our model's probability of the
     favorite covering disagrees with the market's vig-removed implied probability. Same
@@ -204,7 +204,7 @@ def screen_mlb_runline(prediction, home_runline_odds, away_runline_odds):
     home_fair, away_fair = devig_two_way(home_implied, away_implied)
 
     home_edge = home_cover_prob - home_fair
-    if abs(home_edge) < RUNLINE_EDGE_THRESHOLD:
+    if abs(home_edge) < edge_threshold:
         return None
 
     if home_edge > 0:
@@ -226,10 +226,10 @@ def screen_mlb_runline(prediction, home_runline_odds, away_runline_odds):
     }
 
 
-def screen_mlb_total(prediction, market_total):
+def screen_mlb_total(prediction, market_total, edge_threshold=TOTAL_EDGE_THRESHOLD):
     """Flag a total (over/under) bet if our predicted total disagrees with the market by enough to matter."""
     edge = prediction["predicted_total"] - market_total
-    if abs(edge) < TOTAL_EDGE_THRESHOLD:
+    if abs(edge) < edge_threshold:
         return None
 
     side = "Over" if edge > 0 else "Under"

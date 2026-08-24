@@ -31,6 +31,17 @@ def _game_key(home_team, away_team):
     return f"{away_team} @ {home_team}"
 
 
+def _suggested_stake(pick):
+    """Suggested bet size in units, only for strategies backtest/analyze_edge_sizing.py
+    found real evidence for (currently just MLB run line — see model/staking.py). None
+    everywhere else, so the dashboard shows nothing rather than implying a confidence
+    the backtest didn't actually support."""
+    if pick["strategy"] == "mlb_runline":
+        from model.staking import mlb_runline_stake_units
+        return mlb_runline_stake_units(pick["edge_score"], pick["price"])
+    return None
+
+
 def _drop_stale_picks(open_picks, cutoff_hours=STALE_PICK_CUTOFF_HOURS):
     """Keep only picks a run has actually refreshed recently — see STALE_PICK_CUTOFF_HOURS."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=cutoff_hours)
@@ -104,6 +115,7 @@ def build_this_week_data(open_picks, no_data=None):
             "price": pick.get("price"),
             "edge_score": pick["edge_score"],
             "explanation": pick.get("explanation"),
+            "suggested_stake": _suggested_stake(pick),
         })
 
     for pick in open_picks:
@@ -182,6 +194,7 @@ def _build_speculative_week_data(open_picks, strategy_prefix):
             "edge_score": pick["edge_score"],
             "explanation": pick.get("explanation"),
             "speculative": pick["strategy"].endswith("_speculative"),
+            "suggested_stake": _suggested_stake(pick),
         })
 
     return _sorted_week_list(weeks)

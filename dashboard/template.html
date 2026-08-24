@@ -396,7 +396,7 @@ function renderGames() {
 
 function renderGameFlagsTable(flags) {
   const table = document.createElement("table");
-  table.innerHTML = "<thead><tr><th>Market</th><th>Side</th><th>Line</th><th>Edge</th></tr></thead>";
+  table.innerHTML = "<thead><tr><th>Market</th><th>Side</th><th>Line</th><th>Edge</th><th>Suggested Stake</th></tr></thead>";
   const tbody = document.createElement("tbody");
   flags.forEach(f => {
     const tr = document.createElement("tr");
@@ -404,10 +404,11 @@ function renderGameFlagsTable(flags) {
       <td>${f.market_label}${f.speculative ? ' <span class="source-tag">speculative</span>' : ""}</td>
       <td><span class="side-pill">${f.side}</span></td>
       <td>${f.line != null ? f.line.toFixed(1) : "-"}${f.price ? " (" + Math.round(f.price) + ")" : ""}</td>
-      <td>${f.edge_score.toFixed(2)}</td>`;
+      <td>${f.edge_score.toFixed(2)}</td>
+      <td>${f.suggested_stake != null ? f.suggested_stake.toFixed(2) + "u" : "—"}</td>`;
     const expl = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 4;
+    td.colSpan = 5;
     td.className = "explanation";
     td.textContent = f.explanation;
     expl.appendChild(td);
@@ -669,6 +670,18 @@ function renderSeasonPerformance() {
 
   Object.entries(perf.by_strategy || {}).forEach(([strategy, s]) => {
     cardsContainer.appendChild(card(strategyLabel(strategy), `${s.wins}-${s.losses}`, `${(s.win_rate*100).toFixed(1)}% | ROI ${s.roi_pct >= 0 ? "+" : ""}${s.roi_pct}%`, s.roi_pct >= 0 ? "roi-positive" : "roi-negative"));
+
+    // Only MLB run line has real backtested evidence that a bigger edge deserves a
+    // bigger bet (see backtest/analyze_edge_sizing.py) — this shows what real results
+    // would look like staking proportionally to edge size instead of flat 1-unit.
+    if (s.roi_pct_scaled != null) {
+      cardsContainer.appendChild(card(
+        strategyLabel(strategy) + " — Edge-Scaled Stake",
+        `${s.roi_pct_scaled >= 0 ? "+" : ""}${s.roi_pct_scaled}%`,
+        `vs. flat ${s.roi_pct >= 0 ? "+" : ""}${s.roi_pct}% — same ${s.bets} bets, sized by edge`,
+        s.roi_pct_scaled >= 0 ? "roi-positive" : "roi-negative"
+      ));
+    }
   });
 
   const tbody = document.querySelector("#recent-picks-table tbody");

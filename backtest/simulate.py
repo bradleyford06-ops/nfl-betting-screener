@@ -91,9 +91,11 @@ GRADERS = {"spread": grade_spread_flag, "total": grade_total_flag, "moneyline": 
 def run_backtest(burn_in_years, test_years, games_window=17):
     """
     Walk forward through past seasons: for each test game, build team ratings using
-    only games that happened before it, generate a prediction, apply the live
-    screening thresholds, and grade any flagged bets against what actually happened.
-    Returns a list of graded bet records.
+    only games that happened before it, generate a prediction, and grade every game's
+    edge (threshold-free — every game gets a flag with its real edge_score) against
+    what actually happened. Filtering by a specific edge threshold happens afterward
+    in summarize_results, so one backtest run supports a full threshold sweep or
+    per-edge-bucket analysis — same pattern as the CFB/NHL/MLB backtests.
     """
     schedules = load_backtest_data(burn_in_years, test_years)
     team_games = build_team_games(schedules)
@@ -113,9 +115,9 @@ def run_backtest(burn_in_years, test_years, games_window=17):
             continue
 
         candidate_flags = [
-            screen_spread(prediction, -row["spread_line"]),
-            screen_total(prediction, row["total_line"]),
-            screen_moneyline(prediction, row["home_moneyline"], row["away_moneyline"]),
+            screen_spread(prediction, -row["spread_line"], edge_threshold=0),
+            screen_total(prediction, row["total_line"], edge_threshold=0),
+            screen_moneyline(prediction, row["home_moneyline"], row["away_moneyline"], edge_threshold=0),
         ]
 
         for flag in candidate_flags:
@@ -138,12 +140,16 @@ def run_backtest(burn_in_years, test_years, games_window=17):
     return results
 
 
-def summarize_results(results):
-    """Turn graded bet records into a plain-English performance summary, overall and per market."""
-    if not results:
+def summarize_results(results, min_edge=0.0):
+    """Turn graded bet records into a plain-English performance summary, overall and per
+    market, restricted to bets whose edge_score meets min_edge — this is what lets one
+    backtest run answer 'what if the live threshold were X?' for any X, or support a
+    per-edge-bucket breakdown, without re-running the walk-forward simulation."""
+    filtered = [r for r in results if r["edge_score"] >= min_edge]
+    if not filtered:
         return {"overall": None, "by_market": {}}
 
-    df = pd.DataFrame(results)
+    df = pd.DataFrame(filtered)
     decided = df[df["outcome"] != "push"]
 
     def summarize(subset):

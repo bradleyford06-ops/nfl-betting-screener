@@ -53,10 +53,13 @@ def run_mlb_backtest(burn_in_years, test_years, games_window=30, pitcher_games_w
     Walk forward through real historical MLB seasons: for each test game, build team,
     park, and pitcher ratings using only data available before that game's date,
     generate a prediction using the two probable starters MLB's own API recorded for
-    that game, apply the live screening thresholds, and grade any flagged bets against
-    the real historical odds. Uses MLB's own team abbreviation for the home/away key
-    (the odds data is joined onto it, not the other way around) via the schedule's own
-    team-name-to-abbreviation mapping done by the caller before this runs.
+    that game, and grade every game's edge (threshold-free — every game gets a flag with
+    its real edge_score) against the real historical odds. Filtering by a specific edge
+    threshold happens afterward in summarize_results, so one backtest run supports a full
+    threshold sweep or per-edge-bucket analysis, same pattern as the CFB/NFL/NHL
+    backtests. Uses MLB's own team abbreviation for the home/away key (the odds data is
+    joined onto it, not the other way around) via the schedule's own team-name-to-
+    abbreviation mapping done by the caller before this runs.
     """
     all_years = sorted(set(burn_in_years) | set(test_years))
     schedule = get_mlb_schedule(all_years).dropna(subset=["home_score", "away_score"])
@@ -111,9 +114,9 @@ def run_mlb_backtest(burn_in_years, test_years, games_window=30, pitcher_games_w
         away_rl_odds = odds_row["oppRunLineOdds"] if pd.notna(odds_row["oppRunLineOdds"]) else ASSUMED_RUNLINE_ODDS
 
         candidate_flags = [
-            screen_mlb_moneyline(prediction, home_ml, away_ml),
-            screen_mlb_runline(prediction, home_rl_odds, away_rl_odds),
-            screen_mlb_total(prediction, odds_row["total"]),
+            screen_mlb_moneyline(prediction, home_ml, away_ml, edge_threshold=0),
+            screen_mlb_runline(prediction, home_rl_odds, away_rl_odds, edge_threshold=0),
+            screen_mlb_total(prediction, odds_row["total"], edge_threshold=0),
         ]
 
         for flag in candidate_flags:
@@ -128,6 +131,9 @@ def run_mlb_backtest(burn_in_years, test_years, games_window=30, pitcher_games_w
                 "market": flag["market"],
                 "side": flag["side"],
                 "edge_score": flag["edge_score"],
+                "odds": odds_used,
+                "model_prob": flag.get("model_win_prob", flag.get("model_cover_prob")),
+                "market_prob": flag.get("market_implied_prob"),
                 "outcome": outcome,
                 "profit_units": profit,
             })

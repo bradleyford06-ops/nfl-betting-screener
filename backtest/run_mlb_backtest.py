@@ -49,6 +49,7 @@ def main():
     load_dotenv()
 
     from backtest.simulate_mlb import run_mlb_backtest, summarize_results
+    from model.mlb_power_ratings import MONEYLINE_EDGE_THRESHOLD, RUNLINE_EDGE_THRESHOLD, TOTAL_EDGE_THRESHOLD
 
     test_years = parse_year_range(args.test_years)
     burn_in_years = parse_year_range(args.burn_in_years)
@@ -68,10 +69,11 @@ def main():
 
     by_market = {m: [r for r in results if r["market"] == m] for m in ("moneyline", "runline", "total")}
 
-    print("\nAt edge >= 0 (no filter, to see the raw baseline):")
-    print_summary("  MONEYLINE", summarize_results(by_market["moneyline"], min_edge=0.0))
-    print_summary("  RUNLINE  ", summarize_results(by_market["runline"], min_edge=0.0))
-    print_summary("  TOTAL    ", summarize_results(by_market["total"], min_edge=0.0))
+    print(f"\nAt the current live thresholds (moneyline >= {MONEYLINE_EDGE_THRESHOLD}, "
+          f"runline >= {RUNLINE_EDGE_THRESHOLD}, total >= {TOTAL_EDGE_THRESHOLD}):")
+    print_summary("  MONEYLINE", summarize_results(by_market["moneyline"], min_edge=MONEYLINE_EDGE_THRESHOLD))
+    print_summary("  RUNLINE  ", summarize_results(by_market["runline"], min_edge=RUNLINE_EDGE_THRESHOLD))
+    print_summary("  TOTAL    ", summarize_results(by_market["total"], min_edge=TOTAL_EDGE_THRESHOLD))
 
     if args.sweep:
         for market, thresholds in (("moneyline", PROB_SWEEP_THRESHOLDS), ("runline", PROB_SWEEP_THRESHOLDS), ("total", TOTAL_SWEEP_THRESHOLDS)):

@@ -147,12 +147,12 @@ def devig_two_way(prob_a, prob_b):
     return prob_a / total, prob_b / total
 
 
-def screen_spread(prediction, market_spread_home):
+def screen_spread(prediction, market_spread_home, edge_threshold=SPREAD_EDGE_THRESHOLD):
     """Flag a spread bet if our predicted margin disagrees with the market by enough to matter.
     `market_spread_home` follows standard convention: negative means the home team is favored."""
     market_home_margin = -market_spread_home
     edge = prediction["predicted_spread"] - market_home_margin
-    if abs(edge) < SPREAD_EDGE_THRESHOLD:
+    if abs(edge) < edge_threshold:
         return None
 
     side = prediction["home_team"] if edge > 0 else prediction["away_team"]
@@ -170,10 +170,10 @@ def screen_spread(prediction, market_spread_home):
     }
 
 
-def screen_total(prediction, market_total):
+def screen_total(prediction, market_total, edge_threshold=TOTAL_EDGE_THRESHOLD):
     """Flag a total (over/under) bet if our predicted total disagrees with the market by enough to matter."""
     edge = prediction["predicted_total"] - market_total
-    if abs(edge) < TOTAL_EDGE_THRESHOLD:
+    if abs(edge) < edge_threshold:
         return None
 
     side = "Over" if edge > 0 else "Under"
@@ -190,7 +190,7 @@ def screen_total(prediction, market_total):
     }
 
 
-def screen_moneyline(prediction, home_odds, away_odds):
+def screen_moneyline(prediction, home_odds, away_odds, edge_threshold=MONEYLINE_EDGE_THRESHOLD):
     """Flag a moneyline bet if our model's win probability disagrees with the market's
     (vig-removed) implied probability by enough to matter."""
     home_implied = american_odds_to_implied_prob(home_odds)
@@ -200,7 +200,7 @@ def screen_moneyline(prediction, home_odds, away_odds):
     home_edge = prediction["home_win_prob"] - home_fair
     away_edge = -home_edge
 
-    if abs(home_edge) < MONEYLINE_EDGE_THRESHOLD:
+    if abs(home_edge) < edge_threshold:
         return None
 
     if home_edge > 0:
