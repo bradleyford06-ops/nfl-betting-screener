@@ -364,10 +364,9 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
     pitcher_ratings, _ = compute_pitcher_ratings(pitcher_logs, pitcher_games_window)
 
     upcoming = mlb_schedule_df[mlb_schedule_df["home_score"].isna()]
-    schedule_by_matchup = {
-        (row["home_team"], row["away_team"], row["game_date"]): row
-        for _, row in upcoming.iterrows()
-    }
+    schedule_by_teams = {}
+    for _, row in upcoming.iterrows():
+        schedule_by_teams.setdefault((row["home_team"], row["away_team"]), []).append(row)
 
     games = get_game_odds(markets="h2h,spreads,totals", sport=MLB_SPORT)
     flags = []
@@ -378,11 +377,30 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
         commence_time = game.get("commence_time")
         if not commence_time:
             continue
-        game_date = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+        commence_dt = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
 
-        schedule_row = schedule_by_matchup.get((home_full, away_full, game_date))
+        # Matched by real UTC start time, not by calendar-date string -- MLB's own
+        # schedule labels a game by its LOCAL start date, while commence_time is UTC,
+        # so a normal evening game (e.g. 9:40pm ET) already falls on "the next day" in
+        # UTC. Matching on date strings silently grabbed the wrong game in a
+        # back-to-back series (today's completed game vs. tomorrow's, still upcoming,
+        # with different starting pitchers) -- found in production 2026-08-25.
+        # game_datetime_utc is each candidate's own real UTC kickoff, from the same
+        # schedule source reconciliation will use later, so this and reconciliation
+        # agree on which real-world game a pick belongs to.
+        candidates = schedule_by_teams.get((home_full, away_full), [])
+        schedule_row = None
+        best_diff = None
+        for candidate in candidates:
+            candidate_dt = candidate.get("game_datetime_utc")
+            if pd.isna(candidate_dt):
+                continue
+            diff = abs((datetime.fromisoformat(str(candidate_dt).replace("Z", "+00:00")) - commence_dt).total_seconds())
+            if diff <= 6 * 3600 and (best_diff is None or diff < best_diff):
+                schedule_row, best_diff = candidate, diff
+
         if schedule_row is None:
-            logger.debug(f"No matching MLB schedule entry for {away_full} @ {home_full} on {game_date}")
+            logger.debug(f"No matching MLB schedule entry for {away_full} @ {home_full} near {commence_time}")
             continue
 
         home_pitcher_id = schedule_row.get("home_pitcher_id")
@@ -434,7 +452,7 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
         )
         game_context = {
             "home_team": home_full, "away_team": away_full, "commence_time": commence_time,
-            "season": schedule_row["season"], "week": int(game_date.replace("-", "")),
+            "season": schedule_row["season"], "week": int(schedule_row["game_date"].replace("-", "")),
             "pitchers_confirmed": pitchers_confirmed,
         }
 
