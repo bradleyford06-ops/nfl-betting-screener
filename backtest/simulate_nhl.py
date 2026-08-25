@@ -108,7 +108,11 @@ def run_nhl_backtest(burn_in_years, test_years, games_window=25):
 
         candidate_flags = [
             screen_nhl_moneyline(prediction, home_ml, away_ml, edge_threshold=0),
-            screen_nhl_puckline(prediction, ASSUMED_PUCKLINE_ODDS, ASSUMED_PUCKLINE_ODDS, edge_threshold=0),
+            # No real per-side puck-line price in the free data (see ASSUMED_PUCKLINE_ODDS
+            # above), so home/away are assumed fixed at -1.5/+1.5 the way the model itself
+            # defines home_cover_prob -- unlike the live pipeline, there's no real market
+            # point data here to check against.
+            screen_nhl_puckline(prediction, ASSUMED_PUCKLINE_ODDS, -PUCK_LINE, ASSUMED_PUCKLINE_ODDS, PUCK_LINE, edge_threshold=0),
             screen_nhl_total(prediction, odds_row["over_under"], edge_threshold=0),
         ]
 

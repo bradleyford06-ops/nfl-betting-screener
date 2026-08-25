@@ -112,10 +112,14 @@ def run_mlb_backtest(burn_in_years, test_years, games_window=30, pitcher_games_w
         home_ml, away_ml = odds_row["moneyLine"], odds_row["oppMoneyLine"]
         home_rl_odds = odds_row["runLineOdds"] if pd.notna(odds_row["runLineOdds"]) else ASSUMED_RUNLINE_ODDS
         away_rl_odds = odds_row["oppRunLineOdds"] if pd.notna(odds_row["oppRunLineOdds"]) else ASSUMED_RUNLINE_ODDS
+        # runLine/oppRunLine are the real signed point each team was actually quoted at
+        # (+1.5 or -1.5) -- either team can be the run-line favorite (see
+        # model/mlb_power_ratings.py), so this can't be assumed from home/away.
+        home_rl_point, away_rl_point = odds_row["runLine"], odds_row["oppRunLine"]
 
         candidate_flags = [
             screen_mlb_moneyline(prediction, home_ml, away_ml, edge_threshold=0),
-            screen_mlb_runline(prediction, home_rl_odds, away_rl_odds, edge_threshold=0),
+            screen_mlb_runline(prediction, home_rl_odds, home_rl_point, away_rl_odds, away_rl_point, edge_threshold=0),
             screen_mlb_total(prediction, odds_row["total"], edge_threshold=0),
         ]
 

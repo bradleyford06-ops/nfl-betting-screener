@@ -1,5 +1,6 @@
 import logging
 import pandas as pd
+from collections import Counter
 from datetime import datetime
 
 from screener.fetch_stats import get_weekly_player_stats, get_schedules
@@ -36,6 +37,27 @@ logger = logging.getLogger(__name__)
 # model) but aren't broken either — see model/cfb_power_ratings.py for the investigation.
 # Kept live, routed to their own speculative section rather than the main results.
 CFB_TOTALS_ENABLED = True
+
+
+def consensus_price_and_point(quotes):
+    """
+    For a fixed-number spread market (MLB run line, NHL puck line), average a team's
+    price only across bookmakers that agree on which side of the fixed line that team
+    was actually quoted at. Either team can be the favorite (unlike NFL home-field,
+    these sports' home edge is negligible-to-nonexistent), so a book listing a team's
+    price under the opposite point value from another book isn't a typo -- it means the
+    books disagree on who's favored, most often right before a near-even game. Averaging
+    indiscriminately across both would silently mix a favorite's price with an
+    underdog's, corrupting the edge calculation.
+
+    quotes: list of (price, point) tuples for one team, one per bookmaker.
+    Returns (avg_price, consensus_point), or (None, None) if quotes is empty.
+    """
+    if not quotes:
+        return None, None
+    consensus_point = Counter(point for _, point in quotes).most_common(1)[0][0]
+    matching_prices = [price for price, point in quotes if point == consensus_point]
+    return sum(matching_prices) / len(matching_prices), consensus_point
 
 
 def lookup_season_week(schedules_df, home_abbr, away_abbr):
@@ -235,7 +257,8 @@ def run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs, games_window=25):
             logger.debug(f"Skipping {away_full} @ {home_full} — not enough NHL rating data yet")
             continue
 
-        home_ml, away_ml, home_puck_odds, away_puck_odds, total_lines, total_prices = None, None, None, None, [], []
+        home_ml, away_ml, total_lines, total_prices = None, None, [], []
+        home_puck_quotes, away_puck_quotes = [], []
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
                 if market["key"] == "h2h":
@@ -247,14 +270,17 @@ def run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs, games_window=25):
                 elif market["key"] == "spreads":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == home_full:
-                            home_puck_odds = outcome["price"]
+                            home_puck_quotes.append((outcome["price"], outcome["point"]))
                         elif outcome["name"] == away_full:
-                            away_puck_odds = outcome["price"]
+                            away_puck_quotes.append((outcome["price"], outcome["point"]))
                 elif market["key"] == "totals":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == "Over":
                             total_lines.append(outcome["point"])
                             total_prices.append(outcome["price"])
+
+        home_puck_odds, home_puck_point = consensus_price_and_point(home_puck_quotes)
+        away_puck_odds, away_puck_point = consensus_price_and_point(away_puck_quotes)
 
         goalies_confirmed = home_confirmed and away_confirmed
         goalie_caveat = (
@@ -275,7 +301,7 @@ def run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs, games_window=25):
                 flags.append({**flag, **game_context})
 
         if home_puck_odds is not None and away_puck_odds is not None:
-            flag = screen_nhl_puckline(prediction, home_puck_odds, away_puck_odds)
+            flag = screen_nhl_puckline(prediction, home_puck_odds, home_puck_point, away_puck_odds, away_puck_point)
             if flag:
                 flag["explanation"] += goalie_caveat
                 flag["price"] = flag["market_odds"]
@@ -363,7 +389,8 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
             logger.debug(f"Skipping {away_full} @ {home_full} — not enough MLB rating data yet")
             continue
 
-        home_ml, away_ml, home_rl_odds, away_rl_odds, total_lines, total_prices = None, None, None, None, [], []
+        home_ml, away_ml, total_lines, total_prices = None, None, [], []
+        home_rl_quotes, away_rl_quotes = [], []
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
                 if market["key"] == "h2h":
@@ -375,14 +402,17 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
                 elif market["key"] == "spreads":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == home_full:
-                            home_rl_odds = outcome["price"]
+                            home_rl_quotes.append((outcome["price"], outcome["point"]))
                         elif outcome["name"] == away_full:
-                            away_rl_odds = outcome["price"]
+                            away_rl_quotes.append((outcome["price"], outcome["point"]))
                 elif market["key"] == "totals":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == "Over":
                             total_lines.append(outcome["point"])
                             total_prices.append(outcome["price"])
+
+        home_rl_odds, home_rl_point = consensus_price_and_point(home_rl_quotes)
+        away_rl_odds, away_rl_point = consensus_price_and_point(away_rl_quotes)
 
         pitcher_caveat = (
             "" if pitchers_confirmed else
@@ -402,7 +432,7 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
                 speculative_flags.append({**flag, **game_context})
 
         if home_rl_odds is not None and away_rl_odds is not None:
-            flag = screen_mlb_runline(prediction, home_rl_odds, away_rl_odds)
+            flag = screen_mlb_runline(prediction, home_rl_odds, home_rl_point, away_rl_odds, away_rl_point)
             if flag:
                 flag["explanation"] += pitcher_caveat
                 flag["price"] = flag["market_odds"]

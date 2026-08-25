@@ -177,28 +177,39 @@ def screen_nhl_moneyline(prediction, home_odds, away_odds, edge_threshold=MONEYL
     }
 
 
-def screen_nhl_puckline(prediction, home_puck_line_odds, away_puck_line_odds, edge_threshold=PUCKLINE_EDGE_THRESHOLD):
+def screen_nhl_puckline(prediction, home_price, home_point, away_price, away_point, edge_threshold=PUCKLINE_EDGE_THRESHOLD):
     """
     Flag a puck-line bet (the fixed +/-1.5 goal spread) if our model's probability of the
-    favorite covering disagrees with the market's vig-removed implied probability. Unlike
-    a moving NFL spread, the NHL puck-line number itself almost never changes — only the
-    odds do — so this is graded like a moneyline (compare probabilities) rather than like
-    the NFL's screen_spread (compare predicted margins to a market number).
+    favorite covering disagrees with the market's vig-removed implied probability.
+
+    Either team can be the puck-line favorite, so which side is actually favored is read
+    from the market's own point values (home_point/away_point) rather than assumed from
+    home/away. Unlike a moving NFL spread, the NHL puck-line number itself almost never
+    changes — only the odds do — so this is graded like a moneyline (compare
+    probabilities) rather than like the NFL's screen_spread (compare predicted margins
+    to a market number).
     """
-    home_cover_prob = margin_to_win_probability(prediction["predicted_margin"] - PUCK_LINE, margin_std_dev=MARGIN_STD_DEV)
+    home_is_favorite = home_point < 0
+    favorite_team = prediction["home_team"] if home_is_favorite else prediction["away_team"]
+    underdog_team = prediction["away_team"] if home_is_favorite else prediction["home_team"]
+    favorite_price = home_price if home_is_favorite else away_price
+    underdog_price = away_price if home_is_favorite else home_price
 
-    home_implied = american_odds_to_implied_prob(home_puck_line_odds)
-    away_implied = american_odds_to_implied_prob(away_puck_line_odds)
-    home_fair, away_fair = devig_two_way(home_implied, away_implied)
+    favorite_margin = prediction["predicted_margin"] if home_is_favorite else -prediction["predicted_margin"]
+    favorite_cover_prob = margin_to_win_probability(favorite_margin - PUCK_LINE, margin_std_dev=MARGIN_STD_DEV)
 
-    home_edge = home_cover_prob - home_fair
-    if abs(home_edge) < edge_threshold:
+    favorite_implied = american_odds_to_implied_prob(favorite_price)
+    underdog_implied = american_odds_to_implied_prob(underdog_price)
+    favorite_fair, underdog_fair = devig_two_way(favorite_implied, underdog_implied)
+
+    favorite_edge = favorite_cover_prob - favorite_fair
+    if abs(favorite_edge) < edge_threshold:
         return None
 
-    if home_edge > 0:
-        side, odds, model_prob, market_prob, edge = f"{prediction['home_team']} -{PUCK_LINE}", home_puck_line_odds, home_cover_prob, home_fair, home_edge
+    if favorite_edge > 0:
+        side, odds, model_prob, market_prob, edge = f"{favorite_team} -{PUCK_LINE}", favorite_price, favorite_cover_prob, favorite_fair, favorite_edge
     else:
-        side, odds, model_prob, market_prob, edge = f"{prediction['away_team']} +{PUCK_LINE}", away_puck_line_odds, 1 - home_cover_prob, away_fair, -home_edge
+        side, odds, model_prob, market_prob, edge = f"{underdog_team} +{PUCK_LINE}", underdog_price, 1 - favorite_cover_prob, underdog_fair, -favorite_edge
 
     return {
         "market": "puckline",
