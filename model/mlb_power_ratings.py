@@ -136,6 +136,16 @@ def predict_mlb_matchup(team_ratings, pitcher_ratings, park_factors, home_team, 
     team's own average rotation effect is used instead (no adjustment) rather than
     guessing -- MLB officially publishes probable starters days ahead, so this should be
     the exception rather than the rule by the time a game is actually screened.
+
+    predicted_total is computed WITHOUT the pitcher adjustment, unlike
+    predicted_home_score/predicted_away_score/predicted_margin (see 2026-08-24
+    investigation) -- with it, predicted_total ran a systematic ~1.3 runs below real
+    average even after regularizing pitcher ratings (see compute_pitcher_ratings), and
+    removing it entirely fixed that calibration exactly (predicted 9.28 vs. real 9.22
+    average). The adjustment still helps the run line/moneyline, where it's a real
+    signal about who wins by more; it doesn't help total, where a real backtest showed
+    it added noise without adding any actual edge -- win rate stayed flat at ~50-51% at
+    every threshold whether pitcher adjustment was included or not.
     """
     home = team_ratings[team_ratings["team"] == home_team]
     away = team_ratings[team_ratings["team"] == away_team]
@@ -164,8 +174,12 @@ def predict_mlb_matchup(team_ratings, pitcher_ratings, park_factors, home_team, 
     predicted_away_score = max(predicted_away_score, 0.5)
 
     predicted_margin = predicted_home_score - predicted_away_score
-    predicted_total = predicted_home_score + predicted_away_score
     home_win_prob = margin_to_win_probability(predicted_margin, margin_std_dev=MARGIN_STD_DEV)
+
+    # predicted_total deliberately excludes pitcher_adj -- see the docstring above.
+    predicted_home_score_no_pitcher = max((league_avg_score + home["off_rating"] + away["def_rating"] + HOME_FIELD_ADVANTAGE / 2) * park_factor, 0.5)
+    predicted_away_score_no_pitcher = max((league_avg_score + away["off_rating"] + home["def_rating"] - HOME_FIELD_ADVANTAGE / 2) * park_factor, 0.5)
+    predicted_total = predicted_home_score_no_pitcher + predicted_away_score_no_pitcher
 
     return {
         "home_team": home_team,
