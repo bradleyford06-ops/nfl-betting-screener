@@ -70,11 +70,27 @@ def compute_park_factors(schedule_df):
     return (park_avg / league_avg_total).to_dict(), league_avg_total
 
 
+PITCHER_RATING_PRIOR_INNINGS = 15.0  # regularization strength -- roughly 2-3 typical starts worth of league-average innings
+
+
 def compute_pitcher_ratings(pitcher_logs, games_window=PITCHER_GAMES_WINDOW):
     """
     Each starting pitcher's earned-runs-per-9-innings over their last `games_window`
     starts, compared to the league average over the same window. Positive `rating` means
     the pitcher allows fewer earned runs than average (better).
+
+    Regularized toward league average by blending in PITCHER_RATING_PRIOR_INNINGS of
+    league-average innings before computing ERA -- without this, a single disaster start
+    (pulled after a fraction of an inning having allowed several runs) produces an
+    astronomical ERA for that pitcher (earned runs / a near-zero innings count), which
+    then corrupts both that pitcher's own rating and, via team_average_pitcher_effect,
+    every other start's adjustment for that team. Found in production: a real team's
+    average pitcher effect came back at -5.38 (individual ratings normally run -1.5 to
+    +2) and single-handedly dragged that game's predicted total down to 2.29 runs in a
+    game that actually had 8. A pitcher with a full, stable sample (the whole point of
+    games_window) is barely affected by this; a pitcher with only a start or two is
+    pulled most of the way back toward league average, which is the correct behavior
+    when there's not enough real data to trust yet.
     """
     recent = pitcher_logs.sort_values(["pitcher_id", "date"]).groupby("pitcher_id").tail(games_window)
     recent = recent[recent["innings_pitched"] > 0]
@@ -82,13 +98,16 @@ def compute_pitcher_ratings(pitcher_logs, games_window=PITCHER_GAMES_WINDOW):
         return pd.DataFrame(columns=["pitcher_id", "team", "era", "starts", "rating"]), 4.30
 
     league_avg_era = recent["earned_runs"].sum() / recent["innings_pitched"].sum() * 9
+    prior_earned_runs = PITCHER_RATING_PRIOR_INNINGS * league_avg_era / 9
 
     ratings = recent.groupby(["pitcher_id", "team"]).agg(
         earned_runs=("earned_runs", "sum"),
         innings_pitched=("innings_pitched", "sum"),
         starts=("game_pk", "count"),
     ).reset_index()
-    ratings["era"] = ratings["earned_runs"] / ratings["innings_pitched"] * 9
+    regularized_earned_runs = ratings["earned_runs"] + prior_earned_runs
+    regularized_innings = ratings["innings_pitched"] + PITCHER_RATING_PRIOR_INNINGS
+    ratings["era"] = regularized_earned_runs / regularized_innings * 9
     ratings["rating"] = league_avg_era - ratings["era"]
     return ratings, league_avg_era
 
