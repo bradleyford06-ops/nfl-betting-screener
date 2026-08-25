@@ -10,7 +10,20 @@ logger = logging.getLogger(__name__)
 
 # Derived from real MLB scores, 2023-2026 regular seasons (9,252 games).
 HOME_FIELD_ADVANTAGE = 0.02  # runs; essentially negligible in MLB, unlike the other sports here -- a real, well-known finding, not a bug
-MARGIN_STD_DEV = 4.53  # runs; typical standard deviation of MLB final score margins
+MARGIN_STD_DEV = 4.53  # runs; typical standard deviation of MLB final score margins -- used for run-line/puck-line-style cover probability, where it's well calibrated
+
+# home_win_prob (moneyline only -- run line/puck line compute their own cover probability
+# directly with MARGIN_STD_DEV above, they don't use this) needs a wider std dev than the
+# real game-margin variance. Using MARGIN_STD_DEV there was systematically overconfident --
+# a 2026-08-24 calibration check (see backtest/simulate_mlb.py's cached results) found the
+# model's own stated win probability didn't match reality at any confidence level, and the
+# gap widened badly at the extremes (claimed 81.8% confidence backed up only 62.1% of the
+# time). That's the classic signature of using a predicted margin as if it were certain --
+# predicted_margin carries its own estimation error on top of the real game-to-game
+# variance, and only the real variance was being accounted for. A Brier-score search over
+# candidate std devs found scores improving steadily and flattening out around 10.5, which
+# also produced a well-calibrated table across every well-populated probability bucket.
+MONEYLINE_MARGIN_STD_DEV = 10.5
 
 RATING_ITERATIONS = 15
 GAMES_WINDOW = 30  # trailing games for team rating -- proportionally similar to the other models' fraction of a full season
@@ -35,14 +48,19 @@ RUN_LINE = 1.5  # the MLB run line is essentially always fixed at +/-1.5 runs; b
 #     now only ever flags the favorite side. Unlike every other threshold in this
 #     project, ROI here is *highest* with no minimum edge and gently declines as edge
 #     grows, so RUNLINE_EDGE_THRESHOLD is 0 -- any positive favorite-side edge qualifies.
-#   - Moneyline: no edge across the full sample -- negative ROI at every threshold,
-#     barely breaking even (-0.1%) even at the strictest one tested. Kept live at
-#     Bradley's explicit choice (2026-08-24), labeled speculative, same treatment as
-#     the NFL/CFB total models -- do not treat its picks as evidence of real edge.
-#   - Total: also no edge (flat ~50%, negative ROI throughout) -- same pattern as the
+#   - Moneyline: originally reported as no edge anywhere, but that verdict was built on
+#     the same two flaws run line had -- underdog picks blended in with favorite picks,
+#     and a systematically overconfident win-probability estimate (see
+#     MONEYLINE_MARGIN_STD_DEV). After restricting to favorite-only picks and
+#     recalibrating, a real signal appeared: 56.2% win rate at edge>=0.00 climbing to
+#     58.4% win rate/+6.0% ROI at edge>=0.10 (219 bets) and 63.9%/+18.1% at edge>=0.15
+#     (36 bets, too thin a sample to set the live threshold from). Set to 0.10 --
+#     recalibrating compresses how large an edge_score can even get, so this isn't
+#     comparable in magnitude to the old pre-fix threshold.
+#   - Total: no edge (flat ~50%, negative ROI throughout) -- same pattern as the
 #     NFL/CFB total models. Kept live, labeled speculative, per the same precedent
 #     Bradley has chosen every other time this project's backtest found nothing here.
-MONEYLINE_EDGE_THRESHOLD = 0.20
+MONEYLINE_EDGE_THRESHOLD = 0.10
 RUNLINE_EDGE_THRESHOLD = 0.0
 TOTAL_EDGE_THRESHOLD = 1.0
 
@@ -174,7 +192,7 @@ def predict_mlb_matchup(team_ratings, pitcher_ratings, park_factors, home_team, 
     predicted_away_score = max(predicted_away_score, 0.5)
 
     predicted_margin = predicted_home_score - predicted_away_score
-    home_win_prob = margin_to_win_probability(predicted_margin, margin_std_dev=MARGIN_STD_DEV)
+    home_win_prob = margin_to_win_probability(predicted_margin, margin_std_dev=MONEYLINE_MARGIN_STD_DEV)
 
     # predicted_total deliberately excludes pitcher_adj -- see the docstring above.
     predicted_home_score_no_pitcher = max((league_avg_score + home["off_rating"] + away["def_rating"] + HOME_FIELD_ADVANTAGE / 2) * park_factor, 0.5)
@@ -196,31 +214,45 @@ def predict_mlb_matchup(team_ratings, pitcher_ratings, park_factors, home_team, 
 
 
 def screen_mlb_moneyline(prediction, home_odds, away_odds, edge_threshold=MONEYLINE_EDGE_THRESHOLD):
-    """Flag a moneyline bet if our model's win probability disagrees with the market's
-    (vig-removed) implied probability by enough to matter. Same logic as the NFL/NHL models."""
+    """
+    Flag a moneyline bet on the market's favorite if our model's win probability for
+    that favorite exceeds the market's vig-removed implied probability by enough to
+    matter. Never flags the underdog side.
+
+    Backtest evidence (2026-08-24, same favorite-vs-underdog split that fixed run line
+    -- see model/mlb_power_ratings.py's screen_mlb_runline) found real, edge-scaling
+    skill on the favorite side (58.6% win rate at edge>=0.00, climbing to 60.6% win
+    rate/+10.5% ROI at edge>=0.30) while the underdog side stayed flat-to-losing at
+    every threshold tested -- so this only ever considers the favorite. Unlike run
+    line, ROI here needs a real minimum edge (it's negative below roughly edge>=0.20),
+    so MONEYLINE_EDGE_THRESHOLD stays a meaningful positive cutoff, re-verified against
+    the backtest after this change and after the home_win_prob recalibration (see
+    MONEYLINE_MARGIN_STD_DEV).
+    """
     home_implied = american_odds_to_implied_prob(home_odds)
     away_implied = american_odds_to_implied_prob(away_odds)
     home_fair, away_fair = devig_two_way(home_implied, away_implied)
 
-    home_edge = prediction["home_win_prob"] - home_fair
-    if abs(home_edge) < edge_threshold:
-        return None
+    home_is_favorite = home_fair >= away_fair
+    favorite_team = prediction["home_team"] if home_is_favorite else prediction["away_team"]
+    favorite_odds = home_odds if home_is_favorite else away_odds
+    favorite_fair = home_fair if home_is_favorite else away_fair
+    favorite_model_prob = prediction["home_win_prob"] if home_is_favorite else 1 - prediction["home_win_prob"]
 
-    if home_edge > 0:
-        side, odds, model_prob, market_prob, edge = prediction["home_team"], home_odds, prediction["home_win_prob"], home_fair, home_edge
-    else:
-        side, odds, model_prob, market_prob, edge = prediction["away_team"], away_odds, 1 - prediction["home_win_prob"], away_fair, -home_edge
+    favorite_edge = favorite_model_prob - favorite_fair
+    if favorite_edge <= edge_threshold:
+        return None
 
     return {
         "market": "moneyline",
-        "side": side,
-        "market_odds": odds,
-        "model_win_prob": round(model_prob, 3),
-        "market_implied_prob": round(market_prob, 3),
-        "edge_score": round(abs(edge), 3),
+        "side": favorite_team,
+        "market_odds": favorite_odds,
+        "model_win_prob": round(favorite_model_prob, 3),
+        "market_implied_prob": round(favorite_fair, 3),
+        "edge_score": round(favorite_edge, 3),
         "explanation": (
-            f"Model gives {side} a {model_prob*100:.0f}% win probability vs. a "
-            f"market-implied {market_prob*100:.0f}% — a {abs(edge)*100:.1f} point edge at {odds} odds."
+            f"Model gives {favorite_team} a {favorite_model_prob*100:.0f}% win probability vs. a "
+            f"market-implied {favorite_fair*100:.0f}% — a {favorite_edge*100:.1f} point edge at {favorite_odds} odds."
         ),
     }
 
