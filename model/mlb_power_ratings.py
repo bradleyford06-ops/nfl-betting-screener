@@ -23,15 +23,18 @@ RUN_LINE = 1.5  # the MLB run line is essentially always fixed at +/-1.5 runs; b
 # backtest/run_mlb_backtest.py --sweep). A single-season (2018-only) test run looked
 # promising for moneyline (51.7% win rate, +14.6% ROI at edge>=0.30) but that turned out
 # to be noise -- the full 4-season sample reversed it completely.
-#   - Run line: the strongest, cleanest real edge found across every sport in this
-#     project so far. 55.4% win rate/+10.6% ROI with no filter at all, climbing cleanly
-#     to 59.6%/+25.5% at edge>=0.30 -- verified not a mechanical "always bet the dog"
-#     artifact (a healthy 64/36 side split) and, unlike the NHL puck-line result, this
-#     ROI is measured against real market prices (~79% of the time; ~21% falls back to
-#     an assumed standard price where the free data has no real one), not a flat
-#     assumption -- so a profit here is real evidence, not a pricing artifact. Set to
-#     0.10 (5,897 bets, 56.5% win rate, +13.9% ROI, within 5% of the single best total
-#     profit found at any threshold tested).
+#   - Run line: originally reported as the strongest edge in the project (55.4% win
+#     rate/+10.6% ROI, climbing to 59.6%/+25.5%) but that number came from a real bug --
+#     screen_mlb_runline assumed the home team was always the -1.5 favorite, when
+#     either team can be (see 2026-08-24 fix). Refixed and re-backtested: blended
+#     favorite+underdog picks showed NO edge at any threshold (49.3% win rate/-3.4% ROI
+#     unfiltered, negative throughout the sweep). Splitting the two sides apart found
+#     the real story -- favorite-side picks are genuinely good (52.9% win rate/+15.1%
+#     ROI unfiltered, positive at every threshold tested) while underdog-side picks are
+#     genuinely bad (46.0%/-20.6%, negative at every threshold) -- so screen_mlb_runline
+#     now only ever flags the favorite side. Unlike every other threshold in this
+#     project, ROI here is *highest* with no minimum edge and gently declines as edge
+#     grows, so RUNLINE_EDGE_THRESHOLD is 0 -- any positive favorite-side edge qualifies.
 #   - Moneyline: no edge across the full sample -- negative ROI at every threshold,
 #     barely breaking even (-0.1%) even at the strictest one tested. Kept live at
 #     Bradley's explicit choice (2026-08-24), labeled speculative, same treatment as
@@ -40,7 +43,7 @@ RUN_LINE = 1.5  # the MLB run line is essentially always fixed at +/-1.5 runs; b
 #     NFL/CFB total models. Kept live, labeled speculative, per the same precedent
 #     Bradley has chosen every other time this project's backtest found nothing here.
 MONEYLINE_EDGE_THRESHOLD = 0.20
-RUNLINE_EDGE_THRESHOLD = 0.10
+RUNLINE_EDGE_THRESHOLD = 0.0
 TOTAL_EDGE_THRESHOLD = 1.0
 
 
@@ -191,20 +194,28 @@ def screen_mlb_moneyline(prediction, home_odds, away_odds, edge_threshold=MONEYL
 
 def screen_mlb_runline(prediction, home_price, home_point, away_price, away_point, edge_threshold=RUNLINE_EDGE_THRESHOLD):
     """
-    Flag a run-line bet (the fixed +/-1.5 run spread) if our model's probability of the
-    favorite covering disagrees with the market's vig-removed implied probability.
+    Flag a run-line bet on the market's favorite (-1.5) if our model's probability of
+    that favorite covering exceeds the market's vig-removed implied probability by
+    enough to matter. Never flags the underdog (+1.5) side.
+
+    Backtest evidence (see backtest/analyze_edge_sizing.py, 2026-08-24 favorite-vs-
+    underdog split on 2018-2021) found this model has real, stable skill picking
+    favorites worth backing at -1.5 -- 51-53% win rate, +11% to +15% ROI at every edge
+    threshold tested, including no threshold at all -- but is actively bad at picking
+    underdogs worth backing at +1.5 (44-46% win rate, -19% to -22% ROI at every
+    threshold, worse than just blindly betting every underdog). Blending both sides
+    together is what made the market look like it had no edge; splitting them apart
+    is what revealed the real one. Unlike every other threshold in this project, ROI
+    here is highest with NO minimum edge and gently declines as edge grows, so
+    RUNLINE_EDGE_THRESHOLD is set to 0 -- any positive edge on the favorite qualifies.
 
     Either team can be the run-line favorite -- MLB's home-field edge is essentially
     negligible (see HOME_FIELD_ADVANTAGE), so it's close to a coin flip which side gets
     -1.5 -- so which side is actually favored is read from the market's own point
-    values (home_point/away_point) rather than assumed from home/away. Same reasoning
-    as the NHL model's puck-line screening -- the number itself almost never moves,
-    only the odds do, so this is graded like a moneyline rather than like a moving NFL
-    spread.
+    values (home_point/away_point) rather than assumed from home/away.
     """
     home_is_favorite = home_point < 0
     favorite_team = prediction["home_team"] if home_is_favorite else prediction["away_team"]
-    underdog_team = prediction["away_team"] if home_is_favorite else prediction["home_team"]
     favorite_price = home_price if home_is_favorite else away_price
     underdog_price = away_price if home_is_favorite else home_price
 
@@ -213,16 +224,13 @@ def screen_mlb_runline(prediction, home_price, home_point, away_price, away_poin
 
     favorite_implied = american_odds_to_implied_prob(favorite_price)
     underdog_implied = american_odds_to_implied_prob(underdog_price)
-    favorite_fair, underdog_fair = devig_two_way(favorite_implied, underdog_implied)
+    favorite_fair, _ = devig_two_way(favorite_implied, underdog_implied)
 
     favorite_edge = favorite_cover_prob - favorite_fair
-    if abs(favorite_edge) < edge_threshold:
+    if favorite_edge <= edge_threshold:
         return None
 
-    if favorite_edge > 0:
-        side, odds, model_prob, market_prob, edge = f"{favorite_team} -{RUN_LINE}", favorite_price, favorite_cover_prob, favorite_fair, favorite_edge
-    else:
-        side, odds, model_prob, market_prob, edge = f"{underdog_team} +{RUN_LINE}", underdog_price, 1 - favorite_cover_prob, underdog_fair, -favorite_edge
+    side, odds, model_prob, market_prob, edge = f"{favorite_team} -{RUN_LINE}", favorite_price, favorite_cover_prob, favorite_fair, favorite_edge
 
     return {
         "market": "runline",
@@ -230,10 +238,10 @@ def screen_mlb_runline(prediction, home_price, home_point, away_price, away_poin
         "market_odds": odds,
         "model_cover_prob": round(model_prob, 3),
         "market_implied_prob": round(market_prob, 3),
-        "edge_score": round(abs(edge), 3),
+        "edge_score": round(edge, 3),
         "explanation": (
             f"Model gives {side} a {model_prob*100:.0f}% cover probability vs. a "
-            f"market-implied {market_prob*100:.0f}% — a {abs(edge)*100:.1f} point edge at {odds} odds."
+            f"market-implied {market_prob*100:.0f}% — a {edge*100:.1f} point edge at {odds} odds."
         ),
     }
 
