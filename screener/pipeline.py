@@ -443,7 +443,7 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
             if flag:
                 flag["explanation"] += pitcher_caveat
                 flag["price"] = flag["market_odds"]
-                speculative_flags.append({**flag, **game_context})
+                flags.append({**flag, **game_context})
 
         if home_rl_odds is not None and away_rl_odds is not None:
             flag = screen_mlb_runline(prediction, home_rl_odds, home_rl_point, away_rl_odds, away_rl_point)
