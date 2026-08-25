@@ -39,6 +39,13 @@ logger = logging.getLogger(__name__)
 CFB_TOTALS_ENABLED = True
 
 
+def average_price(prices):
+    """Average a team's moneyline price across every bookmaker offering it. Moneyline
+    has no point value to disagree on (each team's own name is the whole story), so
+    unlike consensus_price_and_point below this is a plain average, not a consensus."""
+    return sum(prices) / len(prices) if prices else None
+
+
 def consensus_price_and_point(quotes):
     """
     For a fixed-number spread market (MLB run line, NHL puck line), average a team's
@@ -257,16 +264,17 @@ def run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs, games_window=25):
             logger.debug(f"Skipping {away_full} @ {home_full} — not enough NHL rating data yet")
             continue
 
-        home_ml, away_ml, total_lines, total_prices = None, None, [], []
+        total_lines, total_prices = [], []
+        home_ml_quotes, away_ml_quotes = [], []
         home_puck_quotes, away_puck_quotes = [], []
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
                 if market["key"] == "h2h":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == home_full:
-                            home_ml = outcome["price"]
+                            home_ml_quotes.append(outcome["price"])
                         elif outcome["name"] == away_full:
-                            away_ml = outcome["price"]
+                            away_ml_quotes.append(outcome["price"])
                 elif market["key"] == "spreads":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == home_full:
@@ -279,6 +287,8 @@ def run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs, games_window=25):
                             total_lines.append(outcome["point"])
                             total_prices.append(outcome["price"])
 
+        home_ml = average_price(home_ml_quotes)
+        away_ml = average_price(away_ml_quotes)
         home_puck_odds, home_puck_point = consensus_price_and_point(home_puck_quotes)
         away_puck_odds, away_puck_point = consensus_price_and_point(away_puck_quotes)
 
@@ -389,16 +399,17 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
             logger.debug(f"Skipping {away_full} @ {home_full} — not enough MLB rating data yet")
             continue
 
-        home_ml, away_ml, total_lines, total_prices = None, None, [], []
+        total_lines, total_prices = [], []
+        home_ml_quotes, away_ml_quotes = [], []
         home_rl_quotes, away_rl_quotes = [], []
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
                 if market["key"] == "h2h":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == home_full:
-                            home_ml = outcome["price"]
+                            home_ml_quotes.append(outcome["price"])
                         elif outcome["name"] == away_full:
-                            away_ml = outcome["price"]
+                            away_ml_quotes.append(outcome["price"])
                 elif market["key"] == "spreads":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == home_full:
@@ -410,6 +421,9 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
                         if outcome["name"] == "Over":
                             total_lines.append(outcome["point"])
                             total_prices.append(outcome["price"])
+
+        home_ml = average_price(home_ml_quotes)
+        away_ml = average_price(away_ml_quotes)
 
         home_rl_odds, home_rl_point = consensus_price_and_point(home_rl_quotes)
         away_rl_odds, away_rl_point = consensus_price_and_point(away_rl_quotes)
