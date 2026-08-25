@@ -82,29 +82,3 @@ def model_prob_from_ledger_row(edge_score, price):
     from model.power_ratings import american_odds_to_implied_prob
     market_implied = american_odds_to_implied_prob(price)
     return min(1.0, max(0.0, market_implied + edge_score))
-
-
-# MLB run line is the only market backtest/analyze_edge_sizing.py found real evidence
-# for (see that script's 2026-08-23 run): win rate climbs fairly cleanly from ~51% to
-# ~60% as edge grows, and Kelly-scaled staking beat flat staking on 5,897 real bets
-# (+16.2% ROI vs. +13.9% flat) — see model/mlb_power_ratings.py for the run-line model
-# itself. Every other market tested (NFL/CFB spread, NHL moneyline/total) showed a
-# noisy or even backwards relationship between edge size and outcome quality — sizing
-# up on those would be adding false precision, not real information, so they stay flat.
-MLB_RUNLINE_KELLY_MULTIPLIER = 0.25  # quarter-Kelly, the standard safety margin
-MLB_RUNLINE_ANCHOR_ODDS = -110  # standard juice, used only to normalize "1 unit" — see suggested_stake_units
-
-
-def mlb_runline_stake_units(edge_score, price):
-    """Suggested stake (in the project's usual flat-1-unit units) for a real MLB run-line
-    pick, using only fields already stored on a ledger row — no schema change needed.
-    The only market this project currently has real backtested evidence for sizing on."""
-    from model.mlb_power_ratings import RUNLINE_EDGE_THRESHOLD
-
-    model_prob = model_prob_from_ledger_row(edge_score, price)
-    # Anchor computed the same way real bets are (implied prob at the anchor odds, plus
-    # the threshold edge) so "1 unit" lines up with a real threshold-edge bet, not a
-    # theoretical fair-market one.
-    threshold_prob = model_prob_from_ledger_row(RUNLINE_EDGE_THRESHOLD, MLB_RUNLINE_ANCHOR_ODDS)
-    threshold_kelly = kelly_fraction(threshold_prob, MLB_RUNLINE_ANCHOR_ODDS) * MLB_RUNLINE_KELLY_MULTIPLIER
-    return round(suggested_stake_units(model_prob, price, threshold_kelly, kelly_multiplier=MLB_RUNLINE_KELLY_MULTIPLIER), 2)

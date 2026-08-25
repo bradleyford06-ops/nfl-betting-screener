@@ -204,20 +204,10 @@ def reconcile_all():
     return {"reconciled": reconciled, "still_open": len(open_picks) - reconciled, "cfb_error": cfb_error, "mlb_error": mlb_error}
 
 
-# The only strategy with real backtested evidence that a bigger edge deserves a bigger
-# bet (see backtest/analyze_edge_sizing.py) — every other market showed a noisy or even
-# backwards relationship between edge size and outcome quality. See model/staking.py.
-STAKE_SCALED_STRATEGIES = {"mlb_runline"}
-
-
 def summarize_season(season=None):
     """Win rate and ROI per strategy for reconciled picks — the numbers behind the
-    dashboard's season performance view. For strategies in STAKE_SCALED_STRATEGIES, also
-    reports what ROI would have been staking proportionally to edge size (Kelly-scaled)
-    instead of flat 1-unit, so the dashboard can show real vs. suggested performance
-    side by side."""
+    dashboard's season performance view."""
     from screener.ledger import get_all_picks
-    from model.staking import mlb_runline_stake_units
 
     picks = get_all_picks(season)
     decided = [p for p in picks if p["status"] in ("won", "lost")]
@@ -229,15 +219,7 @@ def summarize_season(season=None):
         lambda p: american_odds_profit(p["price"]) if p["status"] == "won" else -1.0, axis=1
     )
 
-    def stake_units(pick):
-        if pick["strategy"] == "mlb_runline":
-            return mlb_runline_stake_units(pick["edge_score"], pick["price"])
-        return None
-
-    df["stake_units"] = df.apply(stake_units, axis=1)
-    df["profit_units_scaled"] = df["stake_units"] * df["profit_units"]
-
-    def summarize(subset, strategy=None):
+    def summarize(subset):
         wins = (subset["status"] == "won").sum()
         total = len(subset)
         result = {
@@ -248,12 +230,8 @@ def summarize_season(season=None):
             "total_profit_units": round(subset["profit_units"].sum(), 2),
             "roi_pct": round(subset["profit_units"].sum() / total * 100, 1) if total else None,
         }
-        if strategy in STAKE_SCALED_STRATEGIES and total:
-            total_staked = subset["stake_units"].sum()
-            result["total_profit_units_scaled"] = round(subset["profit_units_scaled"].sum(), 2)
-            result["roi_pct_scaled"] = round(subset["profit_units_scaled"].sum() / total_staked * 100, 1) if total_staked else None
         return result
 
     overall = summarize(df)
-    by_strategy = {strategy: summarize(group, strategy) for strategy, group in df.groupby("strategy")}
+    by_strategy = {strategy: summarize(group) for strategy, group in df.groupby("strategy")}
     return {"overall": overall, "by_strategy": by_strategy}
