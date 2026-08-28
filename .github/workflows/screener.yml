@@ -1,15 +1,54 @@
 name: NFL Betting Screener
 
+# GitHub doesn't guarantee scheduled-trigger timing -- it can delay or silently skip a
+# cron firing under platform load, and does not notify when that happens. Found in
+# production 2026-08-28: the 13:00 UTC trigger drifted later each day (30-60min late,
+# then 53min, then 9h48m late) before skipping entirely on this date. Two backup cron
+# times cover that gap; the "already ran today?" check below (schedule-only, manual
+# runs always execute) makes retries safe -- whichever attempt actually fires first does
+# the real work and any later ones that day just no-op instead of duplicating the run,
+# the email, and the commit.
 on:
   schedule:
-    - cron: '0 13 * * *'   # 13:00 UTC daily = 9AM ET / 6AM PT — odds shift throughout the week now, not just Mon/Wed/Fri/Sat
+    - cron: '0 13 * * *'   # 13:00 UTC = 9AM ET / 6AM PT -- primary
+    - cron: '0 15 * * *'   # 15:00 UTC -- backup if the primary didn't fire
+    - cron: '0 17 * * *'   # 17:00 UTC -- final backup
   workflow_dispatch:
 
 permissions:
   contents: write   # needed to commit the updated dashboard + ledger back to the repo
+  actions: read     # needed for check-already-ran's `gh run list` to see prior runs today
 
 jobs:
+  check-already-ran:
+    runs-on: ubuntu-latest
+    outputs:
+      already_ran: ${{ steps.check.outputs.already_ran }}
+    steps:
+      - name: Check whether today's run already succeeded
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Not a scheduled trigger (manual run) -- always executing."
+            echo "already_ran=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          today=$(date -u +%Y-%m-%d)
+          count=$(gh run list --repo "${{ github.repository }}" --workflow=screener.yml \
+            --status=success --json createdAt --limit 20 \
+            | jq -r --arg today "$today" '[.[] | select(.createdAt | startswith($today))] | length')
+          echo "Successful runs already completed today: $count"
+          if [ "$count" -ge 1 ]; then
+            echo "already_ran=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_ran=false" >> "$GITHUB_OUTPUT"
+          fi
+
   run-screener:
+    needs: check-already-ran
+    if: needs.check-already-ran.outputs.already_ran != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
