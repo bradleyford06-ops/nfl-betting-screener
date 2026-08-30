@@ -246,7 +246,7 @@
     <div class="subhead">Recent results</div>
     <div class="table-scroll">
       <table id="recent-picks-table">
-        <thead><tr><th>Week</th><th>Subject</th><th>Market</th><th>Side</th><th>Line</th><th>Result</th></tr></thead>
+        <thead><tr><th>Week / Date</th><th>Subject</th><th>Market</th><th>Side</th><th>Line</th><th>Result</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -672,12 +672,31 @@ function renderSeasonPerformance() {
     cardsContainer.appendChild(card(strategyLabel(strategy), `${s.wins}-${s.losses}`, `${(s.win_rate*100).toFixed(1)}% | ROI ${s.roi_pct >= 0 ? "+" : ""}${s.roi_pct}%`, s.roi_pct >= 0 ? "roi-positive" : "roi-negative"));
   });
 
+  // NFL/CFB "week" is a real season week number; MLB/NHL reuse the same column to hold
+  // the game's calendar date instead (see build_data.py) since those sports don't have
+  // a real week number -- shown here as just the date, not "Week 20260825".
+  function formatGameDate(commenceTime) {
+    if (!commenceTime) return "";
+    const d = new Date(commenceTime);
+    if (isNaN(d)) return "";
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function formatWeekColumn(p) {
+    const dateStr = formatGameDate(p.commence_time);
+    const hasRealWeek = !p.strategy.startsWith("mlb_") && !p.strategy.startsWith("nhl_");
+    if (hasRealWeek) {
+      return dateStr ? `Week ${p.week} · ${dateStr}` : `Week ${p.week}`;
+    }
+    return dateStr || `${p.season} W${p.week}`;
+  }
+
   const tbody = document.querySelector("#recent-picks-table tbody");
   tbody.innerHTML = "";
   [...(DATA.recent_picks || [])].reverse().forEach(p => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${p.season} W${p.week}</td>
+      <td>${formatWeekColumn(p)}</td>
       <td>${p.subject}</td>
       <td>${p.market}</td>
       <td>${p.side}</td>
