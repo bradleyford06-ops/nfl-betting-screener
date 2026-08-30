@@ -244,9 +244,18 @@
   <div class="view" id="view-season">
     <div class="perf-cards" id="perf-cards"></div>
     <div class="subhead">Recent results</div>
+    <div class="controls">
+      <label>Sport: <select id="filter-recent-sport">
+        <option value="">All</option>
+        <option value="NFL">NFL</option>
+        <option value="CFB">College Football</option>
+        <option value="NHL">NHL</option>
+        <option value="MLB">MLB</option>
+      </select></label>
+    </div>
     <div class="table-scroll">
       <table id="recent-picks-table">
-        <thead><tr><th>Week / Date</th><th>Subject</th><th>Market</th><th>Side</th><th>Line</th><th>Result</th></tr></thead>
+        <thead><tr><th>Sport</th><th>Week / Date</th><th>Subject</th><th>Market</th><th>Side</th><th>Line</th><th>Result</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -691,11 +700,27 @@ function renderSeasonPerformance() {
     return dateStr || `${p.season} W${p.week}`;
   }
 
+  function sportOf(strategy) {
+    if (strategy.startsWith("cfb_")) return "CFB";
+    if (strategy.startsWith("nhl_")) return "NHL";
+    if (strategy.startsWith("mlb_")) return "MLB";
+    return "NFL";
+  }
+
+  const sportFilter = document.getElementById("filter-recent-sport").value;
   const tbody = document.querySelector("#recent-picks-table tbody");
   tbody.innerHTML = "";
-  [...(DATA.recent_picks || [])].reverse().forEach(p => {
+  const filteredPicks = (DATA.recent_picks || [])
+    .filter(p => !sportFilter || sportOf(p.strategy) === sportFilter)
+    .sort((a, b) => new Date(b.commence_time) - new Date(a.commence_time));
+
+  if (filteredPicks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No results for this sport yet.</td></tr>';
+  }
+  filteredPicks.forEach(p => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
+      <td>${sportOf(p.strategy)}</td>
       <td>${formatWeekColumn(p)}</td>
       <td>${p.subject}</td>
       <td>${p.market}</td>
@@ -716,6 +741,7 @@ renderNhlWeekPills();
 renderNhlGames();
 renderMlbWeekPills();
 renderMlbGames();
+document.getElementById("filter-recent-sport").addEventListener("change", renderSeasonPerformance);
 renderSeasonPerformance();
 </script>
 
