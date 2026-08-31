@@ -25,6 +25,10 @@ PROP_SOURCE_LABELS = {
     "props_coverage": "Coverage",
 }
 NFL_GAME_STRATEGIES = {"spread", "total"}
+# The Elo-based moneyline model (2026-08-30) is kept live per Bradley's explicit choice
+# despite not clearing this project's usual backtest bar — see CLAUDE.md. Tagged
+# speculative in the UI rather than mixed in at face value with spread/total.
+NFL_SPECULATIVE_GAME_STRATEGIES = {"moneyline_speculative"}
 
 
 def _game_key(home_team, away_team):
@@ -90,7 +94,7 @@ def build_this_week_data(open_picks, no_data=None):
         return bucket["games"][game_key]
 
     for pick in open_picks:
-        if pick["strategy"] not in NFL_GAME_STRATEGIES:
+        if pick["strategy"] not in NFL_GAME_STRATEGIES and pick["strategy"] not in NFL_SPECULATIVE_GAME_STRATEGIES:
             continue
         bucket = get_week_bucket(pick.get("season"), pick.get("week"))
         if bucket is None:
@@ -104,6 +108,7 @@ def build_this_week_data(open_picks, no_data=None):
             "price": pick.get("price"),
             "edge_score": pick["edge_score"],
             "explanation": pick.get("explanation"),
+            "speculative": pick["strategy"] in NFL_SPECULATIVE_GAME_STRATEGIES,
         })
 
     for pick in open_picks:

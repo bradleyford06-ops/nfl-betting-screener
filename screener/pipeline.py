@@ -13,7 +13,11 @@ from screener.nhl_team_map import to_nhl_abbr
 from screener.nhl_goalies import resolve_starting_goalies, most_used_goalie
 from screener.team_map import get_team_name_to_abbr, to_abbr
 from screener.scoring import rank_props, rank_games
-from model.power_ratings import compute_team_ratings, predict_matchup, screen_spread, screen_total
+from model.power_ratings import (
+    compute_team_ratings, predict_matchup, screen_spread, screen_total,
+    american_odds_to_implied_prob, implied_prob_to_american_odds,
+)
+from model.nfl_elo_ratings import build_elo_history, predict_matchup as predict_elo_matchup, screen_elo_moneyline
 from model.cfb_power_ratings import compute_cfb_team_ratings, predict_cfb_matchup, screen_cfb_spread, screen_cfb_total
 from model.nhl_power_ratings import (
     compute_nhl_team_ratings, compute_goalie_ratings, predict_nhl_matchup,
@@ -40,10 +44,21 @@ CFB_TOTALS_ENABLED = True
 
 
 def average_price(prices):
-    """Average a team's moneyline price across every bookmaker offering it. Moneyline
-    has no point value to disagree on (each team's own name is the whole story), so
-    unlike consensus_price_and_point below this is a plain average, not a consensus."""
-    return sum(prices) / len(prices) if prices else None
+    """
+    Average a team's moneyline price across every bookmaker offering it, in implied-
+    probability space rather than raw American-odds space. American odds can't be
+    linearly averaged once books disagree on which side is favored in a near-even game
+    (e.g. one book has a team at -105, another at +100, for the same matchup) -- plain-
+    averaging the raw numbers in that case produces a meaningless blended price that
+    doesn't correspond to any real probability, and silently corrupts any win-probability
+    edge calculated from it. Found in production 2026-08-30 while testing the new NFL Elo
+    moneyline model: a near-even Packers-Vikings game had books split on the favorite, and
+    the old plain average manufactured a fake ~27-point edge that wasn't really there.
+    """
+    if not prices:
+        return None
+    avg_prob = sum(american_odds_to_implied_prob(p) for p in prices) / len(prices)
+    return round(implied_prob_to_american_odds(avg_prob))
 
 
 def consensus_price_and_point(quotes):
@@ -104,6 +119,14 @@ def get_stats_years():
     automatically skipped by the fetch layer, so this always falls back to real data."""
     year = datetime.now().year
     return [year - 2, year - 1, year]
+
+
+def get_elo_stats_years():
+    """The Elo moneyline model needs much more history than the spread/total model to let
+    ratings converge — Elo carries a team's rating forward season to season (with regression
+    toward the mean, not a hard reset), rather than recomputing from a fixed recent window.
+    Uses the same 1999-start range the backtest validated (see backtest/run_elo_backtest.py)."""
+    return list(range(1999, datetime.now().year + 1))
 
 
 def get_cfb_current_week(cfb_schedules_df):
@@ -491,19 +514,26 @@ def run_mlb_screener():
     return run_mlb_game_screener(mlb_schedule_df)
 
 
-def run_game_screener(schedules_df, name_map, current_season, current_week, markets="spreads,totals"):
+def run_game_screener(schedules_df, name_map, current_season, current_week, markets="h2h,spreads,totals"):
     """
-    Screen the upcoming week's NFL games' spread and total against our power-rating model.
-
-    Moneyline screening is intentionally left out: a backtest against 2019-2024 (see
-    backtest/run_backtest.py) showed it lost -20.8% ROI, because the model's win
-    probabilities never got as extreme as the market's on lopsided games, so it kept
-    betting big underdogs against teams that were favored for real reasons. Re-enable
-    once the model has been re-backtested and shown to be profitable on moneylines.
+    Screen the upcoming week's NFL games against two separate models: the power-rating
+    model for spread/total (real backtested edge on spread; see model/power_ratings.py),
+    and a from-scratch Elo rating for moneyline (win/loss-focused rather than scoring-
+    margin-focused — see model/nfl_elo_ratings.py). The original power-rating model was
+    never usable for moneyline (a 2019-2024 backtest lost -20.8% ROI; a 2026-08-30
+    follow-up investigation found this is structural, not a fixable bug — see CLAUDE.md).
+    The Elo replacement is a real, if modest, improvement but still doesn't beat the
+    market's own accuracy, so its picks are kept in their own speculative bucket rather
+    than mixed into the main spread/total results.
     """
     ratings = compute_team_ratings(schedules_df)
+
+    elo_schedules_df = get_schedules(get_elo_stats_years())
+    _, elo_ratings = build_elo_history(elo_schedules_df)
+
     games = get_game_odds(markets=markets)
     flags = []
+    moneyline_speculative_flags = []
 
     for game in games:
         home_full, away_full = game["home_team"], game["away_team"]
@@ -517,11 +547,19 @@ def run_game_screener(schedules_df, name_map, current_season, current_week, mark
         if prediction is None:
             logger.debug(f"Skipping {away_full} @ {home_full} — not enough rating data yet")
             continue
+        elo_prediction = predict_elo_matchup(elo_ratings, home_abbr, away_abbr)
 
+        home_ml_quotes, away_ml_quotes = [], []
         spread_lines, spread_prices, total_lines, total_prices = [], [], [], []
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
-                if market["key"] == "spreads":
+                if market["key"] == "h2h":
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == home_full:
+                            home_ml_quotes.append(outcome["price"])
+                        elif outcome["name"] == away_full:
+                            away_ml_quotes.append(outcome["price"])
+                elif market["key"] == "spreads":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == home_full:
                             spread_lines.append(outcome["point"])
@@ -552,7 +590,15 @@ def run_game_screener(schedules_df, name_map, current_season, current_week, mark
                 flag["price"] = sum(total_prices) / len(total_prices)
                 flags.append({**flag, **game_context})
 
-    return rank_games(flags)
+        home_ml = average_price(home_ml_quotes)
+        away_ml = average_price(away_ml_quotes)
+        if home_ml is not None and away_ml is not None:
+            flag = screen_elo_moneyline(elo_prediction, home_ml, away_ml)
+            if flag:
+                flag["price"] = flag["market_odds"]
+                moneyline_speculative_flags.append({**flag, **game_context})
+
+    return rank_games(flags), rank_games(moneyline_speculative_flags)
 
 
 def run_props_screener(weekly_df, schedules_df, name_map, current_season, current_week, games_window=8):
@@ -737,7 +783,9 @@ def run_screener(props_only=False, games_only=False):
     else:
         logger.info(f"Screening for {current_season} week {current_week}")
 
-    game_flags = [] if props_only else run_game_screener(schedules_df, name_map, current_season, current_week)
+    game_flags, moneyline_speculative_flags = (
+        ([], []) if props_only else run_game_screener(schedules_df, name_map, current_season, current_week)
+    )
 
     cfb_game_flags, cfb_totals_speculative, cfb_error = [], [], None
     if not props_only:
@@ -783,6 +831,7 @@ def run_screener(props_only=False, games_only=False):
 
     return {
         "games": game_flags,
+        "games_moneyline_speculative": moneyline_speculative_flags,
         "cfb_games": cfb_game_flags,
         "cfb_totals_speculative": cfb_totals_speculative,
         "cfb_error": cfb_error,
@@ -829,6 +878,8 @@ def log_results_to_ledger(results):
 
     for flag in results.get("games", []):
         log_flag(flag, flag["market"], f"{flag['away_team']} @ {flag['home_team']}")
+    for flag in results.get("games_moneyline_speculative", []):
+        log_flag(flag, "moneyline_speculative", f"{flag['away_team']} @ {flag['home_team']}")
     for flag in results.get("cfb_games", []):
         log_flag(flag, f"cfb_{flag['market']}", f"{flag['away_team']} @ {flag['home_team']}")
     for flag in results.get("cfb_totals_speculative", []):

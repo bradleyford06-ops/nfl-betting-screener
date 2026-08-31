@@ -2,6 +2,8 @@ import math
 import logging
 import pandas as pd
 
+from model.power_ratings import american_odds_to_implied_prob, devig_two_way
+
 logger = logging.getLogger(__name__)
 
 # A separate win/loss-focused model built specifically for moneyline, after a 2026-08-30
@@ -27,6 +29,16 @@ RELOCATION_MAP = {
     "SD": "LAC",   # Chargers: San Diego -> Los Angeles, 2017
     "STL": "LA",   # Rams: St. Louis -> Los Angeles, 2016
 }
+
+# Backtested against real 2014-2024 moneylines (1999-2013 burn-in, see
+# backtest/run_elo_backtest.py): at this threshold, 345 bets, 41.4% win rate, +3.6% ROI.
+# Shipped live despite the sub-50% win rate — Bradley's explicit call (2026-08-30) after a
+# root-cause investigation (see CLAUDE.md) found this model is a modest accuracy
+# improvement over the older scoring-margin model but still behind the market, and its
+# picks get LESS reliable, not more, at the biggest disagreements (win rate falls toward
+# 0-20% past edge~0.34, thin samples). Treat this as the most speculative signal in the
+# whole project, not a proven edge like NFL spread or MLB run line.
+ELO_MONEYLINE_EDGE_THRESHOLD = 0.15
 
 
 def canonical_team(team):
@@ -142,4 +154,42 @@ def predict_matchup(team_elo, home_team, away_team, home_qb_adjustment=0.0, away
         "home_elo": round(home_elo, 1),
         "away_elo": round(away_elo, 1),
         "home_win_prob": round(elo_win_probability(effective_home_elo, effective_away_elo), 3),
+    }
+
+
+def screen_elo_moneyline(prediction, home_odds, away_odds, edge_threshold=ELO_MONEYLINE_EDGE_THRESHOLD):
+    """
+    Flag a moneyline bet if this Elo model's win probability disagrees with the market's
+    (vig-removed) implied probability by enough to matter. Speculative (see
+    ELO_MONEYLINE_EDGE_THRESHOLD above) — kept live per Bradley's explicit choice despite
+    the backtest not clearing the same bar as this project's proven markets.
+    """
+    home_implied = american_odds_to_implied_prob(home_odds)
+    away_implied = american_odds_to_implied_prob(away_odds)
+    home_fair, away_fair = devig_two_way(home_implied, away_implied)
+
+    home_edge = prediction["home_win_prob"] - home_fair
+    if abs(home_edge) < edge_threshold:
+        return None
+
+    if home_edge > 0:
+        side, odds, edge = prediction["home_team"], home_odds, home_edge
+        model_prob, market_prob = prediction["home_win_prob"], home_fair
+    else:
+        side, odds, edge = prediction["away_team"], away_odds, -home_edge
+        model_prob, market_prob = 1 - prediction["home_win_prob"], away_fair
+
+    return {
+        "market": "moneyline",
+        "side": side,
+        "market_odds": odds,
+        "model_win_prob": round(model_prob, 3),
+        "market_implied_prob": round(market_prob, 3),
+        "edge_score": round(edge, 3),
+        "explanation": (
+            f"Elo model (win/loss-based, not scoring margin) gives {side} a {model_prob*100:.0f}% "
+            f"win probability vs. a market-implied {market_prob*100:.0f}% — a {edge*100:.1f} point "
+            f"edge at {odds} odds. Speculative: this signal hasn't beaten the market's own accuracy "
+            f"in backtesting — see the dashboard note before trusting it like spread or run line picks."
+        ),
     }

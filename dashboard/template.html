@@ -208,6 +208,7 @@
 
 <main>
   <div class="view active" id="view-upcoming">
+    <div class="subhead" style="margin-top:0;">Opponent-adjusted power rating for spread &amp; total — spread is backtested with a real edge, total has none. Moneyline uses a separate Elo rating (win/loss-based, as FiveThirtyEight used for NFL) since the power-rating model can't predict who wins outright — it's a modest improvement but still hasn't beaten the market's own accuracy in backtesting, and gets less reliable (not more) at its biggest disagreements, so treat it as this project's most speculative signal.</div>
     <div class="week-pills" id="week-pills"></div>
     <div class="controls">
       <label>Stat: <select id="filter-market"><option value="">All</option></select></label>
@@ -638,6 +639,7 @@ function renderPropsTable(props) {
 const STRATEGY_LABELS = {
   spread: "NFL Spread",
   total: "NFL Total",
+  moneyline_speculative: "NFL Moneyline (Elo, Speculative)",
   cfb_spread: "CFB Spread",
   cfb_total_speculative: "CFB Total (Speculative)",
   props_trend: "Player Props (Trend)",

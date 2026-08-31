@@ -139,6 +139,15 @@ def american_odds_to_implied_prob(odds):
     return -odds / (-odds + 100)
 
 
+def implied_prob_to_american_odds(prob):
+    """Convert an implied win probability back into an equivalent American odds price —
+    the inverse of american_odds_to_implied_prob, used to turn an averaged probability
+    back into one representative price for display."""
+    if prob >= 0.5:
+        return -100 * prob / (1 - prob)
+    return 100 * (1 - prob) / prob
+
+
 def devig_two_way(prob_a, prob_b):
     """Remove the sportsbook's vig from a two-way market by normalizing implied probabilities to sum to 1."""
     total = prob_a + prob_b

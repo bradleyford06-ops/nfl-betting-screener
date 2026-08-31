@@ -21,15 +21,33 @@ Continuing from: 2026-08-20-cfb-model.md
 - Documented findings in `CLAUDE.md` under the "Sides, Totals & Moneylines" section (new "Moneyline root-cause investigation" note) and in "Current Work Context" per-sport status.
 - Kicked off a read-only audit (background agent) of `screener/pipeline.py`, `screener/ledger.py`, `dashboard/build_data.py`, and the live `data/ledger.db`/`docs/index.html` to confirm no stale NFL moneyline rows exist anywhere that could still render on the dashboard even with screening disabled. [Result pending as this note is written — update once back.]
 
-## Next Step (agreed with Bradley)
-Scope a brand-new NFL moneyline model, not a recalibration of the existing spread-based one. Leading candidate discussed: an Elo-style rating (updates from actual win/loss outcomes with margin-of-victory dampening, rather than raw scoring differential) with a QB-value adjustment layer — the same general approach FiveThirtyEight's well-documented NFL Elo used. This directly targets the diagnosed gap (backup-QB/situational swings a scoring-margin model can't see). Needs its own scoping conversation, data-feasibility check, build, and backtest before going live — same process as every other model in this project (see CFB/NHL/MLB sessions for the pattern).
+## Next Step (agreed with Bradley) — completed same session
+Scoped, built, backtested, and shipped a brand-new NFL moneyline model, not a recalibration of the existing spread-based one.
+
+Built `model/nfl_elo_ratings.py` (Elo rating: updates from actual win/loss outcomes with margin-of-victory dampening, same general approach FiveThirtyEight used for NFL) and `model/qb_adjustment.py` (QB-value adjustment layer using each game's real designated starter from `schedules_df`'s `home_qb_id`/`away_qb_id`, joined to trailing EPA/dropback from weekly stats). Sanity-checked the engine before trusting it (post-2024 ratings correctly topped by Philadelphia/Baltimore/Buffalo/Kansas City/Detroit, bottomed by Carolina/Tennessee/NY Giants).
+
+Backtested against real 2014-2024 moneylines (1999-2013 burn-in, `backtest/run_elo_backtest.py`): modest real accuracy improvement over the old model (Brier 0.221 vs 0.228) but still behind the market (0.212); QB adjustment layer added **zero** measurable value at any strength tested (0/15/25/40 all statistically indistinguishable) — likely because the market prices "who's starting at QB" faster than a trailing-stat signal can get ahead of it. Same red flag as the old model persists: picks get less reliable, not more, at the biggest disagreements.
+
+Recommended NOT shipping given the evidence, but **Bradley explicitly chose to ship it anyway** — same pattern as NFL/CFB totals, NHL puck line, MLB moneyline/total in this project (kept live despite not clearing the proven-edge bar, clearly labeled speculative). Wired into the live pipeline (`screener/pipeline.py`'s `run_game_screener`, new `games_moneyline_speculative` results key, own ledger strategy `moneyline_speculative`, own dashboard badge via `NFL_SPECULATIVE_GAME_STRATEGIES` in `dashboard/build_data.py`, own email section). QB layer deliberately NOT wired live — zero backtested value wasn't worth solving the live "confirmed starter" problem (schedule's QB-id columns only populate after a game is played).
+
+**Found and fixed a real bug during live end-to-end testing** (before touching the live ledger/dashboard — tested via a scratch copy of `ledger.db`, same caution as the CFB build): `average_price` in `screener/pipeline.py` averaged moneyline odds across bookmakers in raw American-odds space, which silently breaks when books disagree on the favorite in a near-even game (one book at -105, another at +100). A real Week 1 Packers-Vikings line produced a fabricated ~27-point fake edge that vanished (correctly, down to a real ~10-point edge below threshold) once fixed to average in implied-probability space instead. This helper is shared by NHL/MLB's live moneyline screening too — their backtests are unaffected (real historical odds columns, not this live path), but their live picks benefit from the same fix going forward.
 
 ## Files changed
-- `CLAUDE.md` — added the moneyline root-cause investigation findings and updated NFL per-sport status
+- `CLAUDE.md` — moneyline root-cause investigation findings, new-model build/backtest/ship writeup, updated NFL/key-directories status
 - `.claude/memory/sessions/2026-08-30-moneyline-investigation.md` — this file
-- (pending) dashboard/ledger cleanup if the background audit finds stale moneyline rows
+- `model/nfl_elo_ratings.py` — new Elo rating engine + `screen_elo_moneyline`
+- `model/qb_adjustment.py` — new QB-value adjustment layer (built, backtested, not wired live)
+- `model/power_ratings.py` — added `implied_prob_to_american_odds` (the odds-averaging bug fix)
+- `backtest/simulate_elo.py`, `backtest/run_elo_backtest.py` — new Elo backtest harness
+- `screener/pipeline.py` — wired Elo moneyline into `run_game_screener`/`run_screener`/`log_results_to_ledger`; fixed `average_price`
+- `dashboard/build_data.py` — new `NFL_SPECULATIVE_GAME_STRATEGIES`, speculative tagging on NFL game flags
+- `dashboard/template.html` — new NFL tab subhead, `moneyline_speculative` strategy label
+- `email_report/formatter.py` — new NFL moneyline (speculative) email section
+- Dashboard/ledger audit (background agent) confirmed no stale moneyline rows existed anywhere before this session started — nothing needed cleaning up
 
 ## Decisions made
-- NFL moneyline stays disabled — now backed by a root-cause investigation, not just an unexplained backtest failure
-- Do not re-attempt to fix moneyline by recalibrating or re-threshold-sweeping the existing power-rating model — ruled out by direct test
-- Build a genuinely new, win/loss-focused model (Elo-style + QB adjustment) as a separate future project, scoped but not yet started
+- NFL moneyline's original disable is now backed by a root-cause investigation, not just an unexplained backtest failure
+- Do not re-attempt to fix the OLD power-rating model for moneyline by recalibrating — ruled out by direct test
+- Built a genuinely new, win/loss-focused Elo model — real backtest evidence, shipped live labeled speculative per Bradley's explicit choice despite the investigator's (my) recommendation not to
+- QB adjustment layer built and backtested but deliberately not wired into the live pipeline — no measurable value, not worth the added complexity of a live starter-confirmation problem
+- Fixed a real, previously-undetected live odds-averaging bug shared by NFL/NHL/MLB moneyline screening, found only through live testing (not caught by any backtest, since backtests use a different, real-historical-odds code path)

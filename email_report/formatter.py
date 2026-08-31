@@ -23,6 +23,7 @@ def format_email(results):
     lines.append("")
 
     games = results.get("games", [])
+    nfl_moneyline_speculative = results.get("games_moneyline_speculative", [])
     cfb_games = results.get("cfb_games", [])
     cfb_totals_speculative = results.get("cfb_totals_speculative", [])
     mlb_games = results.get("mlb_games", [])
@@ -32,7 +33,7 @@ def format_email(results):
     props_coverage = results.get("props_coverage", [])
     props_no_data = results.get("props_no_data", [])
 
-    if not any([games, cfb_games, cfb_totals_speculative, mlb_games, mlb_speculative, props, props_speculative, props_coverage, props_no_data]):
+    if not any([games, nfl_moneyline_speculative, cfb_games, cfb_totals_speculative, mlb_games, mlb_speculative, props, props_speculative, props_coverage, props_no_data]):
         lines.append("No bets passed the screening criteria for this run.")
         lines.append(f"Check the dashboard for the full picture: {DASHBOARD_URL}")
         return "\n".join(lines)
@@ -42,6 +43,17 @@ def format_email(results):
         lines.append("=" * 60)
         lines.append("")
         for i, game in enumerate(games, 1):
+            lines += _format_game_flag(i, game)
+
+    if nfl_moneyline_speculative:
+        lines.append(f"NFL — MONEYLINE (SPECULATIVE)  ({len(nfl_moneyline_speculative)} flagged)")
+        lines.append("A separate Elo-based win/loss model (2026-08-30) — more accurate than our")
+        lines.append("old spread-based approach at picking winners, but still behind the market,")
+        lines.append("and it gets less reliable, not more, at its biggest disagreements. Kept")
+        lines.append("visible, but treat these as informational, not a recommendation.")
+        lines.append("=" * 60)
+        lines.append("")
+        for i, game in enumerate(nfl_moneyline_speculative, 1):
             lines += _format_game_flag(i, game)
 
     if cfb_games:
