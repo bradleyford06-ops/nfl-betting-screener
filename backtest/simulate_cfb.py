@@ -110,7 +110,7 @@ def run_cfb_backtest(burn_in_years, test_years, games_window=GAMES_WINDOW, itera
 
         candidate_flags = [
             screen_cfb_spread(prediction, row["spread_line"], edge_threshold=0),
-            screen_cfb_total(prediction, row["total_line"], edge_threshold=0),
+            screen_cfb_total(prediction, row["total_line"], over_edge_threshold=0, under_edge_threshold=0),
         ]
 
         for flag in candidate_flags:

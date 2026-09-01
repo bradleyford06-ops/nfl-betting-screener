@@ -68,7 +68,25 @@ GAMES_WINDOW = 13  # a full FBS regular season is 12 games, plus a possible conf
 #     NFL total model's 4.5, given CFB's higher scoring variance) purely to keep the pick
 #     volume reasonable — no threshold tested showed a meaningfully different win rate.
 SPREAD_EDGE_THRESHOLD = 4.0
-TOTAL_EDGE_THRESHOLD = 6.0
+
+# Over/Under split (2026-08-31, following the totals deep dive below): after fixing the
+# cache-poisoning bug, tested Bradley's own idea — check Over and Under separately instead
+# of treating "total edge" as one symmetric signal. They turned out to behave in opposite
+# directions as edge grows: Over gets WORSE with bigger disagreements (49.7% win rate at
+# edge>=0 down to 44.8% at edge>=15 — the model's biggest "shootout" calls are its least
+# reliable), while Under gets BETTER and turns real: at edge>=10, two independent 5-year
+# eras (2015-2019, 2020-2024) came back almost identical — 55.1%/+5.2% ROI and 55.2%/+5.3%
+# ROI — one of the cleanest two-era validations found anywhere in this project. Likely
+# mechanism: the model's biggest Over calls tend to come from two efficient offenses
+# meeting, but CFB's huge talent gaps mean many of those become lopsided blowouts (clock-
+# killing, backups in) that suppress scoring anyway; a big Under call usually reflects a
+# real defensive mismatch, which doesn't have that same failure mode working against it.
+# Per Bradley's explicit choice: keep Over visible (speculative, informational only, same
+# flat threshold as before) rather than drop it, since Under's real edge doesn't mean Over
+# is uninteresting to watch — just not tradeable the way Under now is. As with the rest of
+# CFB, ROI assumes standard -110 odds (cfbd has no real total price) — win rate is exact.
+TOTAL_EDGE_THRESHOLD = 6.0  # Over side only — unproven, kept for visibility (speculative)
+TOTAL_UNDER_EDGE_THRESHOLD = 10.0  # Under side — real, two-era-validated edge
 
 # Totals deep dive (2026-08-31, following the same investigation for NFL totals): Bradley
 # noticed CFB predicted totals showing very wide swings and asked why. Found a real,
@@ -104,9 +122,11 @@ TOTAL_EDGE_THRESHOLD = 6.0
 # total_line std dev is also much wider for CFB (7.98) than NFL's (~4.46). This confirms
 # the wider range itself is an accurate reflection of the sport (bigger talent gaps between
 # a 130+ team field, transfer-portal roster churn between seasons, pace/style differences),
-# not something to correct away. The no-edge conclusion for CFB totals stands as-is; the
-# same spread-conviction co-filter that gave NFL totals a real edge (see
-# model/power_ratings.py's TOTAL_SPREAD_CONVICTION_THRESHOLD) has not yet been tested here.
+# not something to correct away. The same spread-conviction co-filter that gave NFL totals a
+# real edge (model/power_ratings.py's TOTAL_SPREAD_CONVICTION_THRESHOLD) was tested here
+# too and did NOT transfer — every total/spread threshold combination tested came back flat
+# (49-51% win rate, negative ROI) across a 10-year, 7,143-game sample. What DID work instead
+# was splitting Over from Under — see TOTAL_UNDER_EDGE_THRESHOLD below.
 
 
 def ratings_from_cfb_team_games(team_games, fbs_teams, games_window=GAMES_WINDOW, iterations=RATING_ITERATIONS):
@@ -237,22 +257,43 @@ def screen_cfb_spread(prediction, market_spread_home, edge_threshold=SPREAD_EDGE
     }
 
 
-def screen_cfb_total(prediction, market_total, edge_threshold=TOTAL_EDGE_THRESHOLD):
-    """Flag a CFB total (over/under) bet if our predicted total disagrees with the market by
-    enough to matter."""
+def screen_cfb_total(prediction, market_total, over_edge_threshold=TOTAL_EDGE_THRESHOLD,
+                      under_edge_threshold=TOTAL_UNDER_EDGE_THRESHOLD):
+    """
+    Flag a CFB total (over/under) bet if our predicted total disagrees with the market by
+    enough to matter. Over and Under are held to different bars — see
+    TOTAL_UNDER_EDGE_THRESHOLD above for why Under is a real, validated edge while Over is
+    still speculative — so the flag carries a `speculative` field the caller uses to route
+    it to the right report section instead of mixing the two together.
+    """
     edge = prediction["predicted_total"] - market_total
-    if abs(edge) < edge_threshold:
+    side = "Over" if edge > 0 else "Under"
+    threshold = under_edge_threshold if side == "Under" else over_edge_threshold
+    if abs(edge) < threshold:
         return None
 
-    side = "Over" if edge > 0 else "Under"
+    if side == "Under":
+        confidence_note = (
+            "Backtested as a real edge (two independent 5-year eras both ~55% win rate, "
+            "+5% ROI) — treat this as trustworthy, not speculative."
+        )
+    else:
+        confidence_note = (
+            "Speculative: Over calls this size have gotten LESS reliable, not more, in "
+            "backtesting (down to a 44.8% win rate at the biggest disagreements) — kept "
+            "visible, but not a recommendation."
+        )
+
     return {
         "market": "total",
         "side": side,
         "market_line": round(market_total, 1),
         "predicted_total": prediction["predicted_total"],
         "edge_score": round(abs(edge), 1),
+        "speculative": side == "Over",
         "explanation": (
             f"Model predicts a total of {prediction['predicted_total']} points "
-            f"vs. a market total of {market_total:.1f} — {abs(edge):.1f} points of disagreement favors the {side.lower()}."
+            f"vs. a market total of {market_total:.1f} — {abs(edge):.1f} points of disagreement favors the {side.lower()}. "
+            f"{confidence_note}"
         ),
     }

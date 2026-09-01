@@ -37,9 +37,10 @@ from model.coverage_sim import (
 
 logger = logging.getLogger(__name__)
 
-# Bradley's call (2026-08-20): CFB totals have no backtested edge (same as the NFL total
-# model) but aren't broken either — see model/cfb_power_ratings.py for the investigation.
-# Kept live, routed to their own speculative section rather than the main results.
+# CFB totals (2026-08-31 deep dive, see model/cfb_power_ratings.py): Under is a real,
+# two-era-validated edge and now routes to the main results; Over stays speculative — no
+# proven edge, and gets worse (not better) at bigger disagreements — and is kept in its own
+# section per Bradley's explicit choice to keep watching it, not because it's tradeable.
 CFB_TOTALS_ENABLED = True
 
 
@@ -145,9 +146,10 @@ def get_cfb_current_week(cfb_schedules_df):
 def run_cfb_game_screener(cfb_schedules_df, cfb_name_map, current_season, current_week, markets="spreads,totals"):
     """
     Screen the upcoming week's FBS college football spread and total against our CFB
-    power-rating model. Spread has a real backtested edge (see backtest/run_cfb_backtest.py);
-    total does not, so its flags are kept separate as speculative rather than mixed into
-    the main results — same treatment as the NFL total model.
+    power-rating model. Spread has a real backtested edge (see backtest/run_cfb_backtest.py).
+    Total is split by side: Under is also a real, validated edge and lands in the main
+    results; Over has no proven edge (and gets worse, not better, at bigger disagreements)
+    so it's kept separate as speculative rather than mixed in at face value.
 
     Games against an FCS opponent are silently skipped — predict_cfb_matchup returns None
     for them, since the FCS side never gets a real rating of its own.
@@ -203,7 +205,9 @@ def run_cfb_game_screener(cfb_schedules_df, cfb_name_map, current_season, curren
             flag = screen_cfb_total(prediction, sum(total_lines) / len(total_lines))
             if flag:
                 flag["price"] = sum(total_prices) / len(total_prices)
-                speculative_flags.append({**flag, **game_context})
+                # Under is a real, validated edge; Over stays speculative — see
+                # model/cfb_power_ratings.py's screen_cfb_total for the backtest evidence.
+                (speculative_flags if flag["speculative"] else flags).append({**flag, **game_context})
 
     return rank_games(flags), rank_games(speculative_flags)
 

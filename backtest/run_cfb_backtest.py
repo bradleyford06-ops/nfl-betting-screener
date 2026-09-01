@@ -44,7 +44,7 @@ def main():
     load_dotenv()
 
     from backtest.simulate_cfb import run_cfb_backtest, summarize_results
-    from model.cfb_power_ratings import SPREAD_EDGE_THRESHOLD, TOTAL_EDGE_THRESHOLD
+    from model.cfb_power_ratings import SPREAD_EDGE_THRESHOLD, TOTAL_EDGE_THRESHOLD, TOTAL_UNDER_EDGE_THRESHOLD
 
     test_years = parse_year_range(args.test_years)
     burn_in_years = parse_year_range(args.burn_in_years)
@@ -64,19 +64,27 @@ def main():
 
     spread_results = [r for r in results if r["market"] == "spread"]
     total_results = [r for r in results if r["market"] == "total"]
+    total_under_results = [r for r in total_results if r["side"] == "Under"]
+    total_over_results = [r for r in total_results if r["side"] == "Over"]
 
-    print(f"\nAt the current live thresholds (spread >= {SPREAD_EDGE_THRESHOLD}, total >= {TOTAL_EDGE_THRESHOLD}):")
-    print_summary("  SPREAD", summarize_results(spread_results, min_edge=SPREAD_EDGE_THRESHOLD))
-    print_summary("  TOTAL ", summarize_results(total_results, min_edge=TOTAL_EDGE_THRESHOLD))
+    print(f"\nAt the current live thresholds (spread >= {SPREAD_EDGE_THRESHOLD}, "
+          f"total UNDER >= {TOTAL_UNDER_EDGE_THRESHOLD}, total OVER >= {TOTAL_EDGE_THRESHOLD} [speculative]):")
+    print_summary("  SPREAD     ", summarize_results(spread_results, min_edge=SPREAD_EDGE_THRESHOLD))
+    print_summary("  TOTAL UNDER", summarize_results(total_under_results, min_edge=TOTAL_UNDER_EDGE_THRESHOLD))
+    print_summary("  TOTAL OVER ", summarize_results(total_over_results, min_edge=TOTAL_EDGE_THRESHOLD))
 
     if args.sweep:
         print("\nSPREAD threshold sweep:")
         for t in SWEEP_THRESHOLDS:
             print_summary(f"  edge >= {t:4.1f}", summarize_results(spread_results, min_edge=t))
 
-        print("\nTOTAL threshold sweep:")
+        print("\nTOTAL UNDER threshold sweep (this is the live, validated rule):")
         for t in SWEEP_THRESHOLDS:
-            print_summary(f"  edge >= {t:4.1f}", summarize_results(total_results, min_edge=t))
+            print_summary(f"  edge >= {t:4.1f}", summarize_results(total_under_results, min_edge=t))
+
+        print("\nTOTAL OVER threshold sweep (speculative — gets WORSE with bigger edges, not better):")
+        for t in SWEEP_THRESHOLDS:
+            print_summary(f"  edge >= {t:4.1f}", summarize_results(total_over_results, min_edge=t))
 
     print()
 

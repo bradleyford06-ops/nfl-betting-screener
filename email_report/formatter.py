@@ -57,17 +57,21 @@ def format_email(results):
             lines += _format_game_flag(i, game)
 
     if cfb_games:
-        lines.append(f"COLLEGE FOOTBALL — SPREADS & TOTALS  ({len(cfb_games)} flagged)")
-        lines.append("Our own opponent-adjusted power rating for all FBS teams, backtested")
-        lines.append("against 2019-2024 (54.1% win rate, +3.3% ROI at the live threshold).")
+        lines.append(f"COLLEGE FOOTBALL — SPREADS & TOTAL UNDERS  ({len(cfb_games)} flagged)")
+        lines.append("Our own opponent-adjusted power rating for all FBS teams. Spread")
+        lines.append("backtested at 54.1% win rate, +3.3% ROI; total Unders separately at")
+        lines.append("~55% win rate, +5% ROI (validated across two independent 5-year eras)")
+        lines.append("at the live threshold. Total Overs are NOT included here — no proven")
+        lines.append("edge, see the speculative section below.")
         lines.append("=" * 60)
         lines.append("")
         for i, game in enumerate(cfb_games, 1):
             lines += _format_game_flag(i, game)
 
     if cfb_totals_speculative:
-        lines.append(f"COLLEGE FOOTBALL — TOTALS (SPECULATIVE)  ({len(cfb_totals_speculative)} flagged)")
-        lines.append("Backtesting found no proven edge for CFB totals — kept visible, but treat")
+        lines.append(f"COLLEGE FOOTBALL — TOTAL OVERS (SPECULATIVE)  ({len(cfb_totals_speculative)} flagged)")
+        lines.append("Backtesting found no proven edge for CFB total Overs — they actually get")
+        lines.append("LESS reliable at bigger disagreements, not more. Kept visible, but treat")
         lines.append("these as informational, not a recommendation.")
         lines.append("=" * 60)
         lines.append("")

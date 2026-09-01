@@ -225,19 +225,19 @@
   </div>
 
   <div class="view" id="view-cfb">
-    <div class="subhead" style="margin-top:0;">FBS spreads &amp; totals — our own opponent-adjusted power rating, validated against SP+. Spread is backtested with a real edge; totals have none (see explanation on speculative picks below).</div>
+    <div class="subhead" style="margin-top:0;">FBS spreads &amp; totals — our own opponent-adjusted power rating, validated against SP+. Spread is backtested with a real edge. Totals are split by side: Under is also a real, two-era-validated edge; Over has none and actually gets less reliable at bigger disagreements, so it's shown separately, tagged speculative.</div>
     <div class="week-pills" id="cfb-week-pills"></div>
     <div id="cfb-games-container"></div>
   </div>
 
   <div class="view" id="view-nhl">
-    <div class="subhead" style="margin-top:0;">Goalie-adjusted power rating for moneyline &amp; total — moneyline and total are backtested with a real edge; puck line has none (a naive "always bet the road team" strategy wins the same market most of the time, a structural quirk of hockey scoring), same speculative treatment as the CFB total model. Days are shown instead of weeks since NHL plays most days.</div>
+    <div class="subhead" style="margin-top:0;">Goalie-adjusted power rating for moneyline &amp; total — moneyline and total are backtested with a real edge; puck line has none (a naive "always bet the road team" strategy wins the same market most of the time, a structural quirk of hockey scoring) and is shown separately, tagged speculative. Days are shown instead of weeks since NHL plays most days.</div>
     <div class="week-pills" id="nhl-week-pills"></div>
     <div id="nhl-games-container"></div>
   </div>
 
   <div class="view" id="view-mlb">
-    <div class="subhead" style="margin-top:0;">Pitcher- and park-adjusted power rating for run line — the strongest backtested edge found in this project so far (2018-2021: 56.5% win rate, +13.9% ROI at the live threshold). Moneyline and total have no proven edge, same speculative treatment as the CFB total model. Days are shown instead of weeks since MLB plays most days.</div>
+    <div class="subhead" style="margin-top:0;">Pitcher- and park-adjusted power rating for run line — the strongest backtested edge found in this project so far (2018-2021: 56.5% win rate, +13.9% ROI at the live threshold). Moneyline and total have no proven edge and are shown separately, tagged speculative. Days are shown instead of weeks since MLB plays most days.</div>
     <div class="week-pills" id="mlb-week-pills"></div>
     <div id="mlb-games-container"></div>
   </div>
@@ -641,7 +641,8 @@ const STRATEGY_LABELS = {
   total: "NFL Total",
   moneyline_speculative: "NFL Moneyline (Elo, Speculative)",
   cfb_spread: "CFB Spread",
-  cfb_total_speculative: "CFB Total (Speculative)",
+  cfb_total: "CFB Total (Under)",
+  cfb_total_speculative: "CFB Total (Over, Speculative)",
   props_trend: "Player Props (Trend)",
   props_speculative: "Player Props (Speculative)",
   props_coverage: "Player Props (Coverage)",
