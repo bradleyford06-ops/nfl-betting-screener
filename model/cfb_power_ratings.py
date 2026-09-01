@@ -70,6 +70,44 @@ GAMES_WINDOW = 13  # a full FBS regular season is 12 games, plus a possible conf
 SPREAD_EDGE_THRESHOLD = 4.0
 TOTAL_EDGE_THRESHOLD = 6.0
 
+# Totals deep dive (2026-08-31, following the same investigation for NFL totals): Bradley
+# noticed CFB predicted totals showing very wide swings and asked why. Found a real,
+# serious reliability bug, now fixed in screener/fetch_cfb_stats.py: a transient cfbd API
+# outage mid-fetch caused most years of a multi-year schedule/lines request to silently
+# fail while one year succeeded, and since at least one year succeeded, the resulting
+# PARTIAL dataset got cached as if it were the complete one. Every rating computed from
+# that poisoned cache was then built from one frozen, years-stale season — e.g. Oklahoma
+# State's home rating was identical to six decimal places across 34 games spanning
+# 2019-2024, because its actual 2018-2024 games had silently vanished from the fetch and
+# only its 2017 game log remained. This produced predicted totals as high as 95.7 and
+# total edges up to 47.7 points. Fixed by refusing to cache a fetch where an
+# already-completed season's year failed (see _reject_stale_year_failures) — a stale-year
+# failure is now a hard, visible error instead of a silent, corrupted cache write.
+# Re-verified with a clean cache: extreme (20+ point) edges dropped from 417 to 19 out of
+# ~4,200 games, and the exact-duplicate-prediction pattern disappeared entirely. The
+# underlying backtest conclusion is UNCHANGED by this fix (spread 2244/54.1%/+3.3%, total
+# 1426/48.9%/-6.6% — identical to the pre-existing documented numbers above) — this was a
+# fresh corruption from a live outage during this investigation, not a long-standing issue
+# baked into those numbers.
+#
+# A smaller, real (not buggy) contributor also confirmed: recent FCS-to-FBS transition
+# programs (James Madison, Sam Houston, Jacksonville State, Kennesaw State) genuinely have
+# very little FBS-level rating history in their first 1-2 seasons (as few as 1-9 games vs.
+# the normal 13), producing legitimately noisier predictions for their games — about 30 of
+# 4,226 graded games (~0.7%). Not fixed — same unregularized-small-sample pattern the props
+# model already handles with a scaled-up required edge (see model/player_trends.py), a
+# reasonable future improvement if these thin-sample picks turn out to be a drag, but low
+# volume enough not to prioritize yet.
+#
+# After excluding both of the above, CFB totals still show real, LEGITIMATE extra variance
+# vs. NFL: predicted_total std dev 10.3 vs. NFL's ~6.6, and — importantly — the MARKET's own
+# total_line std dev is also much wider for CFB (7.98) than NFL's (~4.46). This confirms
+# the wider range itself is an accurate reflection of the sport (bigger talent gaps between
+# a 130+ team field, transfer-portal roster churn between seasons, pace/style differences),
+# not something to correct away. The no-edge conclusion for CFB totals stands as-is; the
+# same spread-conviction co-filter that gave NFL totals a real edge (see
+# model/power_ratings.py's TOTAL_SPREAD_CONVICTION_THRESHOLD) has not yet been tested here.
+
 
 def ratings_from_cfb_team_games(team_games, fbs_teams, games_window=GAMES_WINDOW, iterations=RATING_ITERATIONS):
     """

@@ -2,12 +2,34 @@ import os
 import re
 import unicodedata
 import logging
+from datetime import datetime
 import pandas as pd
 from screener.cache import get_cached, save_cache
 
 logger = logging.getLogger(__name__)
 
 CFB_CACHE_TTL_HOURS = 20  # college football stats/lines only update after games, same reasoning as the NFL fetch layer
+
+
+def _reject_stale_year_failures(failed_years, all_years, what):
+    """
+    A year with no data yet is normal for the current/upcoming season, but a year fully in
+    the past should always have complete data — if it failed anyway (e.g. a transient API
+    outage mid-fetch), that's a real failure, not "not published yet." Found 2026-08-31: a
+    cfbd outage during a multi-year fetch caused years 2018-2024 to be silently skipped
+    while 2017 succeeded, and since at least one year succeeded, the resulting PARTIAL
+    dataset got cached as if it were the complete one -- every rating computed from that
+    cache was then silently built from one frozen, years-stale season until the cache
+    naturally expired. Raises if any failed year is unambiguously historical, so a bad
+    partial fetch is never mistaken for a real, complete one and cached as such.
+    """
+    current_year = datetime.now().year
+    stale_failures = [y for y in failed_years if y < current_year]
+    if stale_failures:
+        raise RuntimeError(
+            f"{what} failed for already-completed season(s) {sorted(stale_failures)} out of {sorted(all_years)} "
+            f"— likely a transient API issue, not missing data. Not caching a partial result."
+        )
 
 
 def _api_client():
@@ -35,6 +57,7 @@ def get_cfb_schedules(years):
 
     import cfbd
     frames = []
+    failed_years = []
     with _api_client() as client:
         games_api = cfbd.GamesApi(client)
         for year in years:
@@ -54,9 +77,11 @@ def get_cfb_schedules(years):
                 } for g in games]))
             except Exception as e:
                 logger.warning(f"No FBS schedule available yet for {year}: {e}")
+                failed_years.append(year)
 
     if not frames:
         raise RuntimeError(f"No FBS schedule data available for any of {years}")
+    _reject_stale_year_failures(failed_years, years, "FBS schedule fetch")
 
     df = pd.concat(frames, ignore_index=True)
     save_cache(cache_key, df.to_dict(orient="records"))
@@ -78,6 +103,7 @@ def get_cfb_betting_lines(years):
 
     import cfbd
     rows = []
+    failed_years = []
     with _api_client() as client:
         betting_api = cfbd.BettingApi(client)
         for year in years:
@@ -86,6 +112,7 @@ def get_cfb_betting_lines(years):
                 games = betting_api.get_lines(year=year, season_type="regular")
             except Exception as e:
                 logger.warning(f"No FBS betting lines available yet for {year}: {e}")
+                failed_years.append(year)
                 continue
 
             for g in games:
@@ -112,6 +139,7 @@ def get_cfb_betting_lines(years):
 
     if not rows:
         raise RuntimeError(f"No FBS betting lines available for any of {years}")
+    _reject_stale_year_failures(failed_years, years, "FBS betting lines fetch")
 
     df = pd.DataFrame(rows)
     save_cache(cache_key, df.to_dict(orient="records"))
