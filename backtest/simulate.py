@@ -114,6 +114,11 @@ def run_backtest(burn_in_years, test_years, games_window=17):
         if prediction is None:
             continue
 
+        # Captured for every game (not just ones that clear a spread threshold) so a total
+        # pick's companion spread-conviction check (see total_conviction_ok) can be swept
+        # at any threshold later, same as edge_score itself.
+        spread_edge_this_game = abs(prediction["predicted_spread"] - (-row["spread_line"]))
+
         candidate_flags = [
             screen_spread(prediction, -row["spread_line"], edge_threshold=0),
             screen_total(prediction, row["total_line"], edge_threshold=0),
@@ -132,6 +137,7 @@ def run_backtest(burn_in_years, test_years, games_window=17):
                 "market": flag["market"],
                 "side": flag["side"],
                 "edge_score": flag["edge_score"],
+                "spread_edge": spread_edge_this_game if flag["market"] == "total" else None,
                 "odds": odds,
                 "outcome": outcome,
                 "profit_units": profit,
@@ -140,12 +146,19 @@ def run_backtest(burn_in_years, test_years, games_window=17):
     return results
 
 
-def summarize_results(results, min_edge=0.0):
+def summarize_results(results, min_edge=0.0, min_spread_edge=0.0):
     """Turn graded bet records into a plain-English performance summary, overall and per
     market, restricted to bets whose edge_score meets min_edge — this is what lets one
     backtest run answer 'what if the live threshold were X?' for any X, or support a
-    per-edge-bucket breakdown, without re-running the walk-forward simulation."""
+    per-edge-bucket breakdown, without re-running the walk-forward simulation.
+
+    `min_spread_edge` additionally restricts TOTAL bets to games where the model's spread
+    disagreement also clears this bar — see model/power_ratings.py's total_conviction_ok
+    and TOTAL_SPREAD_CONVICTION_THRESHOLD for why a total edge alone isn't trusted. Has no
+    effect on spread/moneyline rows, which don't carry a spread_edge value."""
     filtered = [r for r in results if r["edge_score"] >= min_edge]
+    if min_spread_edge > 0:
+        filtered = [r for r in filtered if r["market"] != "total" or (r.get("spread_edge") or 0) >= min_spread_edge]
     if not filtered:
         return {"overall": None, "by_market": {}}
 

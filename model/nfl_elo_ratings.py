@@ -2,7 +2,7 @@ import math
 import logging
 import pandas as pd
 
-from model.power_ratings import american_odds_to_implied_prob, devig_two_way
+from model.power_ratings import american_odds_to_implied_prob, devig_two_way, canonical_team
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +21,9 @@ HOME_FIELD_ELO = 48.0  # home-field advantage in Elo points — FiveThirtyEight'
 SEASON_REGRESSION = 1 / 3  # fraction of each team's rating pulled back toward league-average between seasons
 MOV_DAMPENING_CONSTANT = 2.2  # tempers how much a blowout win moves ratings vs. a coin-flip win — FiveThirtyEight's published constant
 
-# Some franchises changed cities/abbreviations during the data window this model is trained
-# on. Without this, the model would treat (e.g.) the Raiders' Oakland and Las Vegas years as
-# two different teams and lose all rating history at the move.
-RELOCATION_MAP = {
-    "OAK": "LV",   # Raiders: Oakland -> Las Vegas, 2020
-    "SD": "LAC",   # Chargers: San Diego -> Los Angeles, 2017
-    "STL": "LA",   # Rams: St. Louis -> Los Angeles, 2016
-}
+# Team relocation handling (canonical_team, RELOCATION_MAP) lives in model/power_ratings.py
+# and is imported above — kept in one place since model/power_ratings.py picked up the same
+# need on 2026-08-31 (see its own comment for the story of how that surfaced).
 
 # Backtested against real 2014-2024 moneylines (1999-2013 burn-in, see
 # backtest/run_elo_backtest.py): at this threshold, 345 bets, 41.4% win rate, +3.6% ROI.
@@ -39,11 +34,6 @@ RELOCATION_MAP = {
 # 0-20% past edge~0.34, thin samples). Treat this as the most speculative signal in the
 # whole project, not a proven edge like NFL spread or MLB run line.
 ELO_MONEYLINE_EDGE_THRESHOLD = 0.15
-
-
-def canonical_team(team):
-    """Map a historical team code to its current one so a relocated franchise keeps one continuous rating."""
-    return RELOCATION_MAP.get(team, team)
 
 
 def elo_win_probability(elo_a, elo_b):

@@ -21,11 +21,46 @@ MARGIN_STD_DEV = 13.5  # typical standard deviation of NFL final score margins, 
 #   - Moneyline: disabled entirely (see screener/pipeline.py) — even after the
 #     opponent-adjustment fix, no threshold showed a clean, well-sampled edge.
 SPREAD_EDGE_THRESHOLD = 8.0  # points of disagreement with the market before a spread is worth flagging
-TOTAL_EDGE_THRESHOLD = 4.5  # points of disagreement before a total is worth flagging — NOT backed by backtest evidence of an edge
+
+# TOTAL_EDGE_THRESHOLD used to be a flat 4.5 with no backtest edge at any threshold tested
+# (Bradley kept it live anyway, labeled speculative). Deep-dive investigation (2026-08-31,
+# after Bradley asked to look into totals specifically) found a real, if modest, fix: only
+# trust a total pick when the model ALSO disagrees strongly with the market's SPREAD in
+# that same game — a total edge on its own is mostly noise, but one that shows up alongside
+# a genuine spread disagreement (the same 8-point bar already proven for spread) is real
+# signal. A first pass at a looser combined rule (total edge>=6 + spread edge>=6) looked
+# good in a two-era check, but partly evaporated once a separate relocation bug (see
+# RELOCATION_MAP above) was fixed — that bug had been manufacturing some of the "hits" via
+# noisy predictions for newly-relocated teams. Re-validated on the bug-fixed model at the
+# stricter 8/8 bar: 192 bets over 2010-2024, 56.2% win rate, +9.4% ROI, and — the important
+# check — POSITIVE in both independent halves of that period (61.2%/+19.4% in 2010-2017,
+# 52.3%/+1.5% in 2018-2024), unlike the looser rule which reversed sign between halves.
+# Real, but much thinner than spread (~13 picks/season vs spread's ~26) and weaker in the
+# more recent half — treat as a genuine edge, not as trustworthy as spread yet.
+TOTAL_EDGE_THRESHOLD = 8.0  # points of disagreement before a total is worth flagging
+TOTAL_SPREAD_CONVICTION_THRESHOLD = 8.0  # a total pick also needs the SAME game's spread edge to clear this bar
 MONEYLINE_EDGE_THRESHOLD = 0.15  # unused live (moneyline screening is disabled) — kept for the backtest harness
 
 
 RATING_ITERATIONS = 15  # how many passes the opponent-adjustment loop runs before settling
+
+# Some franchises changed cities/abbreviations during the data window this model trains
+# on. Without this, the model treats (e.g.) the Raiders' Oakland and Las Vegas years as
+# two unrelated teams, so right after a move the "new" team starts from zero rating
+# history — found 2026-08-31 while investigating unrealistically high predicted totals:
+# LV had only 6 games of history by week 8 of its first Las Vegas season (2020) instead
+# of the normal 17, and that thin, noisy sample produced a 68.1-point predicted total for
+# LV @ CLE (actual: 22). Same relocations model/nfl_elo_ratings.py already accounts for.
+RELOCATION_MAP = {
+    "OAK": "LV",   # Raiders: Oakland -> Las Vegas, 2020
+    "SD": "LAC",   # Chargers: San Diego -> Los Angeles, 2017
+    "STL": "LA",   # Rams: St. Louis -> Los Angeles, 2016
+}
+
+
+def canonical_team(team):
+    """Map a historical team code to its current one so a relocated franchise keeps one continuous rating history."""
+    return RELOCATION_MAP.get(team, team)
 
 
 def build_team_games(schedules_df):
@@ -42,7 +77,10 @@ def build_team_games(schedules_df):
     away_rows = completed[["season", "week", "away_team", "home_team", "away_score", "home_score"]].rename(
         columns={"away_team": "team", "home_team": "opponent", "away_score": "scored", "home_score": "allowed"}
     )
-    return pd.concat([home_rows, away_rows]).sort_values(["team", "season", "week"])
+    team_games = pd.concat([home_rows, away_rows])
+    team_games["team"] = team_games["team"].map(canonical_team)
+    team_games["opponent"] = team_games["opponent"].map(canonical_team)
+    return team_games.sort_values(["team", "season", "week"])
 
 
 def ratings_from_team_games(team_games, games_window=17, iterations=RATING_ITERATIONS):
@@ -96,8 +134,8 @@ def predict_matchup(ratings_df, home_team, away_team):
     Predict a score, spread, and total for one matchup: each team's opponent-adjusted
     offensive rating against the other team's opponent-adjusted defensive rating.
     """
-    home = ratings_df[ratings_df["team"] == home_team]
-    away = ratings_df[ratings_df["team"] == away_team]
+    home = ratings_df[ratings_df["team"] == canonical_team(home_team)]
+    away = ratings_df[ratings_df["team"] == canonical_team(away_team)]
     if home.empty or away.empty:
         return None
 
@@ -179,8 +217,24 @@ def screen_spread(prediction, market_spread_home, edge_threshold=SPREAD_EDGE_THR
     }
 
 
+def total_conviction_ok(prediction, market_spread_home, threshold=TOTAL_SPREAD_CONVICTION_THRESHOLD):
+    """
+    A total pick is only trusted when the model ALSO disagrees strongly with the market's
+    spread in this same game — see TOTAL_SPREAD_CONVICTION_THRESHOLD for the backtest
+    evidence behind this. `market_spread_home` follows standard convention: negative means
+    the home team is favored. Returns False (fails closed) if no spread line is available
+    to check against.
+    """
+    if market_spread_home is None:
+        return False
+    market_home_margin = -market_spread_home
+    spread_edge = abs(prediction["predicted_spread"] - market_home_margin)
+    return spread_edge >= threshold
+
+
 def screen_total(prediction, market_total, edge_threshold=TOTAL_EDGE_THRESHOLD):
-    """Flag a total (over/under) bet if our predicted total disagrees with the market by enough to matter."""
+    """Flag a total (over/under) bet if our predicted total disagrees with the market by enough to matter.
+    Callers should also check total_conviction_ok before trusting this flag — see its docstring."""
     edge = prediction["predicted_total"] - market_total
     if abs(edge) < edge_threshold:
         return None
@@ -194,7 +248,9 @@ def screen_total(prediction, market_total, edge_threshold=TOTAL_EDGE_THRESHOLD):
         "edge_score": round(abs(edge), 1),
         "explanation": (
             f"Model predicts a total of {prediction['predicted_total']} points "
-            f"vs. a market total of {market_total:.1f} — {abs(edge):.1f} points of disagreement favors the {side.lower()}."
+            f"vs. a market total of {market_total:.1f} — {abs(edge):.1f} points of disagreement favors the {side.lower()}. "
+            f"Only flagged because the model also strongly disagrees with the market's spread in this same game "
+            f"(predicted spread {prediction['predicted_spread']:+.1f}) — a total disagreement alone isn't trusted."
         ),
     }
 

@@ -14,7 +14,7 @@ from screener.nhl_goalies import resolve_starting_goalies, most_used_goalie
 from screener.team_map import get_team_name_to_abbr, to_abbr
 from screener.scoring import rank_props, rank_games
 from model.power_ratings import (
-    compute_team_ratings, predict_matchup, screen_spread, screen_total,
+    compute_team_ratings, predict_matchup, screen_spread, screen_total, total_conviction_ok,
     american_odds_to_implied_prob, implied_prob_to_american_odds,
 )
 from model.nfl_elo_ratings import build_elo_history, predict_matchup as predict_elo_matchup, screen_elo_moneyline
@@ -586,7 +586,8 @@ def run_game_screener(schedules_df, name_map, current_season, current_week, mark
 
         if total_lines:
             flag = screen_total(prediction, sum(total_lines) / len(total_lines))
-            if flag:
+            market_spread_home = sum(spread_lines) / len(spread_lines) if spread_lines else None
+            if flag and total_conviction_ok(prediction, market_spread_home):
                 flag["price"] = sum(total_prices) / len(total_prices)
                 flags.append({**flag, **game_context})
 

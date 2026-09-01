@@ -67,8 +67,8 @@ def format_email(results):
 
     if cfb_totals_speculative:
         lines.append(f"COLLEGE FOOTBALL — TOTALS (SPECULATIVE)  ({len(cfb_totals_speculative)} flagged)")
-        lines.append("Backtesting found no proven edge for CFB totals (same as the NFL total")
-        lines.append("model) — kept visible, but treat these as informational, not a recommendation.")
+        lines.append("Backtesting found no proven edge for CFB totals — kept visible, but treat")
+        lines.append("these as informational, not a recommendation.")
         lines.append("=" * 60)
         lines.append("")
         for i, game in enumerate(cfb_totals_speculative, 1):

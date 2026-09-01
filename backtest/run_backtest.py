@@ -45,7 +45,9 @@ def main():
     load_dotenv()
 
     from backtest.simulate import run_backtest, summarize_results
-    from model.power_ratings import SPREAD_EDGE_THRESHOLD, TOTAL_EDGE_THRESHOLD, MONEYLINE_EDGE_THRESHOLD
+    from model.power_ratings import (
+        SPREAD_EDGE_THRESHOLD, TOTAL_EDGE_THRESHOLD, TOTAL_SPREAD_CONVICTION_THRESHOLD, MONEYLINE_EDGE_THRESHOLD,
+    )
 
     test_years = parse_year_range(args.test_years)
     burn_in_years = parse_year_range(args.burn_in_years)
@@ -68,14 +70,19 @@ def main():
     moneyline_results = [r for r in results if r["market"] == "moneyline"]
 
     print(f"\nAt the current live thresholds (spread >= {SPREAD_EDGE_THRESHOLD}, "
-          f"total >= {TOTAL_EDGE_THRESHOLD}, moneyline >= {MONEYLINE_EDGE_THRESHOLD}):")
+          f"total >= {TOTAL_EDGE_THRESHOLD} AND spread >= {TOTAL_SPREAD_CONVICTION_THRESHOLD} "
+          f"in the same game, moneyline >= {MONEYLINE_EDGE_THRESHOLD}):")
     print_summary("  SPREAD    ", summarize_results(spread_results, min_edge=SPREAD_EDGE_THRESHOLD))
-    print_summary("  TOTAL     ", summarize_results(total_results, min_edge=TOTAL_EDGE_THRESHOLD))
+    print_summary("  TOTAL     ", summarize_results(total_results, min_edge=TOTAL_EDGE_THRESHOLD, min_spread_edge=TOTAL_SPREAD_CONVICTION_THRESHOLD))
     print_summary("  MONEYLINE ", summarize_results(moneyline_results, min_edge=MONEYLINE_EDGE_THRESHOLD))
 
+    total_flagged = [
+        r for r in total_results
+        if r["edge_score"] >= TOTAL_EDGE_THRESHOLD and (r.get("spread_edge") or 0) >= TOTAL_SPREAD_CONVICTION_THRESHOLD
+    ]
     overall_at_threshold = summarize_results(
         [r for r in spread_results if r["edge_score"] >= SPREAD_EDGE_THRESHOLD]
-        + [r for r in total_results if r["edge_score"] >= TOTAL_EDGE_THRESHOLD]
+        + total_flagged
         + [r for r in moneyline_results if r["edge_score"] >= MONEYLINE_EDGE_THRESHOLD]
     )
     if overall_at_threshold["overall"] and overall_at_threshold["overall"]["bets"] < 100:
@@ -87,7 +94,12 @@ def main():
         for t in SWEEP_THRESHOLDS_POINTS:
             print_summary(f"  edge >= {t:4.1f}", summarize_results(spread_results, min_edge=t))
 
-        print("\nTOTAL threshold sweep (points):")
+        print(f"\nTOTAL threshold sweep (points) — spread-conviction co-filter fixed at >= {TOTAL_SPREAD_CONVICTION_THRESHOLD} "
+              f"(this is the live rule; see model/power_ratings.py's total_conviction_ok):")
+        for t in SWEEP_THRESHOLDS_POINTS:
+            print_summary(f"  edge >= {t:4.1f}", summarize_results(total_results, min_edge=t, min_spread_edge=TOTAL_SPREAD_CONVICTION_THRESHOLD))
+
+        print("\nTOTAL threshold sweep (points) — WITHOUT the spread-conviction co-filter, for comparison:")
         for t in SWEEP_THRESHOLDS_POINTS:
             print_summary(f"  edge >= {t:4.1f}", summarize_results(total_results, min_edge=t))
 

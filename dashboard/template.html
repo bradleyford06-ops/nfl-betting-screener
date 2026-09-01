@@ -208,7 +208,7 @@
 
 <main>
   <div class="view active" id="view-upcoming">
-    <div class="subhead" style="margin-top:0;">Opponent-adjusted power rating for spread &amp; total — spread is backtested with a real edge, total has none. Moneyline uses a separate Elo rating (win/loss-based, as FiveThirtyEight used for NFL) since the power-rating model can't predict who wins outright — it's a modest improvement but still hasn't beaten the market's own accuracy in backtesting, and gets less reliable (not more) at its biggest disagreements, so treat it as this project's most speculative signal.</div>
+    <div class="subhead" style="margin-top:0;">Opponent-adjusted power rating for spread &amp; total — spread is backtested with a real edge. Total is only flagged when the model ALSO strongly disagrees with the market's spread in that same game (a total disagreement alone isn't trusted) — a real, two-era-validated edge, but thinner and less confident than spread's. Moneyline uses a separate Elo rating (win/loss-based, as FiveThirtyEight used for NFL) since the power-rating model can't predict who wins outright — it's a modest improvement but still hasn't beaten the market's own accuracy in backtesting, and gets less reliable (not more) at its biggest disagreements, so treat it as this project's most speculative signal.</div>
     <div class="week-pills" id="week-pills"></div>
     <div class="controls">
       <label>Stat: <select id="filter-market"><option value="">All</option></select></label>
@@ -225,19 +225,19 @@
   </div>
 
   <div class="view" id="view-cfb">
-    <div class="subhead" style="margin-top:0;">FBS spreads &amp; totals — our own opponent-adjusted power rating, validated against SP+. Spread is backtested with a real edge; totals have none (see explanation on speculative picks below), same treatment as the NFL total model.</div>
+    <div class="subhead" style="margin-top:0;">FBS spreads &amp; totals — our own opponent-adjusted power rating, validated against SP+. Spread is backtested with a real edge; totals have none (see explanation on speculative picks below).</div>
     <div class="week-pills" id="cfb-week-pills"></div>
     <div id="cfb-games-container"></div>
   </div>
 
   <div class="view" id="view-nhl">
-    <div class="subhead" style="margin-top:0;">Goalie-adjusted power rating for moneyline &amp; total — moneyline and total are backtested with a real edge; puck line has none (a naive "always bet the road team" strategy wins the same market most of the time, a structural quirk of hockey scoring), same speculative treatment as the NFL/CFB total models. Days are shown instead of weeks since NHL plays most days.</div>
+    <div class="subhead" style="margin-top:0;">Goalie-adjusted power rating for moneyline &amp; total — moneyline and total are backtested with a real edge; puck line has none (a naive "always bet the road team" strategy wins the same market most of the time, a structural quirk of hockey scoring), same speculative treatment as the CFB total model. Days are shown instead of weeks since NHL plays most days.</div>
     <div class="week-pills" id="nhl-week-pills"></div>
     <div id="nhl-games-container"></div>
   </div>
 
   <div class="view" id="view-mlb">
-    <div class="subhead" style="margin-top:0;">Pitcher- and park-adjusted power rating for run line — the strongest backtested edge found in this project so far (2018-2021: 56.5% win rate, +13.9% ROI at the live threshold). Moneyline and total have no proven edge, same speculative treatment as the NFL/CFB total models. Days are shown instead of weeks since MLB plays most days.</div>
+    <div class="subhead" style="margin-top:0;">Pitcher- and park-adjusted power rating for run line — the strongest backtested edge found in this project so far (2018-2021: 56.5% win rate, +13.9% ROI at the live threshold). Moneyline and total have no proven edge, same speculative treatment as the CFB total model. Days are shown instead of weeks since MLB plays most days.</div>
     <div class="week-pills" id="mlb-week-pills"></div>
     <div id="mlb-games-container"></div>
   </div>
