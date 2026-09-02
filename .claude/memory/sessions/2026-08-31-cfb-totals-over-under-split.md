@@ -27,3 +27,48 @@ Continuing from: 2026-08-31-cfb-totals-deep-dive.md (same day, same session)
 
 ## Next Step
 Report findings to Bradley, including the transition-duplicate heads-up, and confirm whether to push tonight's combined work (CFB cache-poisoning fix + Over/Under split) to GitHub.
+
+## End of Session
+
+Completed this session:
+- Investigated why NFL moneyline never wins, root-caused it (the model is built from scoring margin, which can't see things like backup QBs that the market prices in fast — a structural gap, not a bug), then built and shipped a brand-new Elo-based moneyline model as a replacement, live but labeled speculative per Bradley's explicit call
+- Deep-dove into NFL totals, found a real fix: only trust a total pick when the model also disagrees strongly with the market's spread — real, validated edge, now live
+- Along the way, found and fixed a real bug in the core NFL model: three relocated franchises (Raiders, Chargers, Rams) had no rating history carried over from before their moves, causing occasional wild predictions — fixing it also slightly improved the proven spread edge
+- Deep-dove into CFB totals at Bradley's request, found a much bigger bug: a transient outage on the college football data provider had silently corrupted the ratings cache into replaying one frozen season indefinitely — fixed, verified it eliminated the extreme predictions
+- Split CFB totals by side per Bradley's request: Unders are a real, two-era-validated edge now live in the main results; Overs stay visible but clearly labeled speculative
+- Found GitHub had silently skipped both of today's scheduled runs (a worse repeat of a known platform flakiness issue), manually triggered it, and confirmed the CFB fix is live and working correctly on real data
+
+Still pending:
+- A temporary, self-resolving display quirk: a handful of CFB Under picks will briefly show up twice (once under the old label, once under the new one) until those games are played or ~2 more days pass
+- Surveyed other markets worth a similar deep dive (NHL puck line, MLB moneyline/total) but haven't started either yet
+- Today's repeated cron-skip is worth watching — may need a fourth backup trigger time if it keeps happening
+
+Files changed:
+- `model/nfl_elo_ratings.py`, `model/qb_adjustment.py` — new Elo-based NFL moneyline model plus a QB-value adjustment layer (built and backtested, not wired live — added no measurable value)
+- `backtest/simulate_elo.py`, `backtest/run_elo_backtest.py` — new backtest harness for the Elo model
+- `model/power_ratings.py` — added `RELOCATION_MAP`/`canonical_team` (the franchise-relocation bug fix), `TOTAL_SPREAD_CONVICTION_THRESHOLD` and `total_conviction_ok` (the NFL totals fix), `implied_prob_to_american_odds`
+- `screener/fetch_cfb_stats.py` — new `_reject_stale_year_failures` guard (the CFB cache-poisoning fix)
+- `model/cfb_power_ratings.py` — `TOTAL_UNDER_EDGE_THRESHOLD`, `screen_cfb_total` now asymmetric by side with a `speculative` field
+- `backtest/simulate_cfb.py`, `backtest/run_cfb_backtest.py` — Over/Under and spread-conviction reporting added to the CLI tools
+- `screener/pipeline.py` — wired the Elo moneyline model live, wired the NFL total spread-conviction filter, routes CFB total flags by side instead of always to speculative
+- `dashboard/build_data.py`, `dashboard/template.html`, `email_report/formatter.py` — updated labels/subheads/email text across NFL and CFB to reflect all of the above; cleaned up stale cross-references between sports' descriptions
+- `CLAUDE.md` — documented all four investigations and their outcomes
+- Five new session memory files documenting each investigation in detail (`2026-08-30-moneyline-investigation.md`, `2026-08-31-totals-deep-dive.md`, `2026-08-31-cfb-totals-deep-dive.md`, this file)
+- `data/ledger.db`, `docs/index.html` — updated by real automated/manually-triggered screener runs during this session
+
+Decisions made:
+- NFL moneyline: ship the new Elo model live despite it still not beating the market, same speculative-but-visible pattern used elsewhere in this project; the QB adjustment layer stays built but unwired since it added zero measurable value
+- NFL totals: raised the live threshold and added the spread-conviction co-filter — fewer picks, but backed by real two-era evidence instead of "no edge, kept anyway"
+- CFB totals: Over kept live and visible per Bradley's explicit request (not dropped, despite no edge), labeled speculative; Under promoted to a real, two-era-validated signal at edge≥10
+- Did not attempt to migrate or clean up the pre-existing stale `cfb_total_speculative` Under rows in the live ledger — a temporary, self-resolving display artifact, not worth touching the permanent ledger without Bradley's explicit sign-off for a cosmetic issue that clears itself within days
+- Manually triggered today's screener run via `gh workflow run` rather than waiting for the last backup cron, to get real results and verify the CFB fix without delay
+
+Blockers or warnings:
+- GitHub silently skipped two consecutive scheduled cron triggers today (13:00 and 15:00 UTC) before the third backup got its chance — worse than the single-miss pattern that originally justified the three-backup-time setup. Worth watching; may need a fourth backup or an explicit "no successful run by noon ET" alert if it recurs.
+- The CFB Under-pick duplicate display artifact (see above) is expected and harmless, but don't mistake it for a new bug if noticed before it clears
+- All of tonight's CFB/NFL model changes are pushed live to GitHub and already reflected in a real production run — nothing is sitting uncommitted
+
+Recommended first step next session:
+Check whether the CFB duplicate picks have cleared on their own, then decide whether to dig into NHL puck line or MLB moneyline/total next (both flagged as good candidates for the same deep-dive treatment used on NFL/CFB totals this session).
+
+Session duration: One very long session — NFL moneyline root-cause + Elo model build/ship, NFL totals fix + a real relocation bug fix, CFB totals deep dive + cache-poisoning bug fix, CFB Over/Under split, and a live production incident (missed scheduled run) resolved same-day.
