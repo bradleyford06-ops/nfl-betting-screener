@@ -15,7 +15,7 @@ GAME_MARKETS = {"spread", "total", "moneyline", "runline"}
 def american_odds_profit(odds, stake=1.0):
     """Profit on a winning bet of `stake` units at American odds (does not include the stake) —
     same formula as the backtests, kept local here to avoid a cross-package import from backtest/."""
-    if odds is None:
+    if not odds:
         return 0.0
     if odds > 0:
         return stake * odds / 100

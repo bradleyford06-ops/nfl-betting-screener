@@ -59,6 +59,7 @@ def record_pick(strategy, season, week, subject, market, side, line, edge_score,
     we know when we first spotted it.
     """
     now = datetime.now(timezone.utc).isoformat()
+    price = price or None  # American odds are never legitimately 0 — treat 0 as missing data, not a real price
     conn = get_connection()
     conn.execute("""
         INSERT INTO picks (strategy, season, week, subject, market, side, line, price, edge_score,
