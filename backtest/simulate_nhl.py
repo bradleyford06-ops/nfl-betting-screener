@@ -160,12 +160,17 @@ def grade_flag(flag, game, odds_row):
         return ("win" if flag["side"] == winner else "loss"), flag["market_odds"]
 
     if flag["market"] == "puckline":
-        home_covers = home_margin > PUCK_LINE  # home wins by 2+
-        away_covers = home_margin < PUCK_LINE  # away doesn't lose by 2+ (i.e. loses by <=1 or wins outright) — the exact complement of home_covers
-        if flag["side"].startswith(game["home_team"]):
-            return ("win" if home_covers else "loss"), flag["market_odds"]
-        else:
-            return ("win" if away_covers else "loss"), flag["market_odds"]
+        # Either team can be the puck-line favorite, and screen_nhl_puckline can flag
+        # either the favorite (-1.5) or the underdog (+1.5) side -- see
+        # model/nhl_power_ratings.py. Which team needs which threshold must be read from
+        # the actual sign in flag["side"], not assumed from home/away: assuming home is
+        # always the favorite (needs to win by 2+) and away always the underdog (just
+        # needs to not lose by 2+) is the exact bug found and fixed for MLB run line
+        # (2026-09-06, see CLAUDE.md) -- this had the identical flaw.
+        is_home_side = flag["side"].startswith(game["home_team"])
+        picked_margin = home_margin if is_home_side else -home_margin
+        threshold = -PUCK_LINE if f"+{PUCK_LINE}" in flag["side"] else PUCK_LINE
+        return ("win" if picked_margin > threshold else "loss"), flag["market_odds"]
 
     if flag["market"] == "total":
         actual_total = game["home_score"] + game["away_score"]
