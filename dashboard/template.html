@@ -211,6 +211,7 @@
     <div class="subhead" style="margin-top:0;">Opponent-adjusted power rating for spread &amp; total — spread is backtested with a real edge. Total is only flagged when the model ALSO strongly disagrees with the market's spread in that same game (a total disagreement alone isn't trusted) — a real, two-era-validated edge, but thinner and less confident than spread's. Moneyline uses a separate Elo rating (win/loss-based, as FiveThirtyEight used for NFL) since the power-rating model can't predict who wins outright — it's a modest improvement but still hasn't beaten the market's own accuracy in backtesting, and gets less reliable (not more) at its biggest disagreements, so treat it as this project's most speculative signal.</div>
     <div class="week-pills" id="week-pills"></div>
     <div class="controls">
+      <input type="text" id="search-nfl" placeholder="Search team or matchup...">
       <label>Stat: <select id="filter-market"><option value="">All</option></select></label>
       <label>Source: <select id="filter-source">
         <option value="">All</option>
@@ -227,18 +228,27 @@
   <div class="view" id="view-cfb">
     <div class="subhead" style="margin-top:0;">FBS spreads &amp; totals — our own opponent-adjusted power rating, validated against SP+. Spread is backtested with a real edge. Totals are split by side: Under is also a real, two-era-validated edge; Over has none and actually gets less reliable at bigger disagreements, so it's shown separately, tagged speculative.</div>
     <div class="week-pills" id="cfb-week-pills"></div>
+    <div class="controls">
+      <input type="text" id="search-cfb" placeholder="Search team or matchup...">
+    </div>
     <div id="cfb-games-container"></div>
   </div>
 
   <div class="view" id="view-nhl">
     <div class="subhead" style="margin-top:0;">Goalie-adjusted power rating for moneyline &amp; total — moneyline and total are backtested with a real edge; puck line has none (a naive "always bet the road team" strategy wins the same market most of the time, a structural quirk of hockey scoring) and is shown separately, tagged speculative. Days are shown instead of weeks since NHL plays most days.</div>
     <div class="week-pills" id="nhl-week-pills"></div>
+    <div class="controls">
+      <input type="text" id="search-nhl" placeholder="Search team or matchup...">
+    </div>
     <div id="nhl-games-container"></div>
   </div>
 
   <div class="view" id="view-mlb">
     <div class="subhead" style="margin-top:0;">Pitcher- and park-adjusted power rating for run line — the strongest backtested edge found in this project so far (2018-2021: 56.5% win rate, +13.9% ROI at the live threshold). Moneyline and total have no proven edge and are shown separately, tagged speculative. Days are shown instead of weeks since MLB plays most days.</div>
     <div class="week-pills" id="mlb-week-pills"></div>
+    <div class="controls">
+      <input type="text" id="search-mlb" placeholder="Search team or matchup...">
+    </div>
     <div id="mlb-games-container"></div>
   </div>
 
@@ -280,6 +290,16 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 
 // ---------- Upcoming Picks ----------
 let currentWeekIndex = 0;
+
+function formatGameTime(commenceTime) {
+  if (!commenceTime) return "";
+  const d = new Date(commenceTime);
+  return d.toLocaleString(undefined, {
+    weekday: "short", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit",
+    timeZone: "America/Los_Angeles", timeZoneName: "short",
+  });
+}
 
 function edgeBadgeClass(edge, isProp) {
   const threshold = isProp ? 0.25 : 8;
@@ -328,10 +348,13 @@ function renderGames() {
   const marketFilter = document.getElementById("filter-market").value;
   const sourceFilter = document.getElementById("filter-source").value;
   const hideSmall = document.getElementById("filter-hide-small").checked;
+  const searchTerm = document.getElementById("search-nfl").value.trim().toLowerCase();
 
   let anyRendered = false;
 
   week.games.forEach(game => {
+    if (searchTerm && !game.matchup.toLowerCase().includes(searchTerm)) return;
+
     let gameFlags = game.game_flags.filter(f =>
       (!marketFilter || f.market === marketFilter) &&
       (!sourceFilter || sourceFilter === "games")
@@ -353,6 +376,7 @@ function renderGames() {
     header.innerHTML = `
       <div>
         <div class="game-matchup">${game.matchup}</div>
+        <div class="game-meta">${formatGameTime(game.commence_time)}</div>
         <div class="game-meta">${gameFlags.length} side/total pick${gameFlags.length===1?"":"s"}, ${props.length} prop${props.length===1?"":"s"}</div>
       </div>
       <div class="badge-row">
@@ -455,7 +479,13 @@ function renderCfbGames() {
     return;
   }
 
+  const searchTerm = document.getElementById("search-cfb").value.trim().toLowerCase();
+  let anyRendered = false;
+
   week.games.forEach(game => {
+    if (searchTerm && !game.matchup.toLowerCase().includes(searchTerm)) return;
+    anyRendered = true;
+
     const card = document.createElement("div");
     card.className = "game-card";
 
@@ -464,6 +494,7 @@ function renderCfbGames() {
     header.innerHTML = `
       <div>
         <div class="game-matchup">${game.matchup}</div>
+        <div class="game-meta">${formatGameTime(game.commence_time)}</div>
         <div class="game-meta">${game.game_flags.length} pick${game.game_flags.length===1?"":"s"}</div>
       </div>
       <div class="badge-row">
@@ -479,6 +510,10 @@ function renderCfbGames() {
     card.appendChild(body);
     container.appendChild(card);
   });
+
+  if (!anyRendered) {
+    container.innerHTML = '<div class="empty-state">No CFB games match your search.</div>';
+  }
 }
 
 // ---------- NHL ----------
@@ -511,7 +546,13 @@ function renderNhlGames() {
     return;
   }
 
+  const searchTerm = document.getElementById("search-nhl").value.trim().toLowerCase();
+  let anyRendered = false;
+
   week.games.forEach(game => {
+    if (searchTerm && !game.matchup.toLowerCase().includes(searchTerm)) return;
+    anyRendered = true;
+
     const card = document.createElement("div");
     card.className = "game-card";
 
@@ -535,6 +576,10 @@ function renderNhlGames() {
     card.appendChild(body);
     container.appendChild(card);
   });
+
+  if (!anyRendered) {
+    container.innerHTML = '<div class="empty-state">No NHL games match your search.</div>';
+  }
 }
 
 // ---------- MLB ----------
@@ -561,7 +606,13 @@ function renderMlbGames() {
     return;
   }
 
+  const searchTerm = document.getElementById("search-mlb").value.trim().toLowerCase();
+  let anyRendered = false;
+
   week.games.forEach(game => {
+    if (searchTerm && !game.matchup.toLowerCase().includes(searchTerm)) return;
+    anyRendered = true;
+
     const card = document.createElement("div");
     card.className = "game-card";
 
@@ -585,6 +636,10 @@ function renderMlbGames() {
     card.appendChild(body);
     container.appendChild(card);
   });
+
+  if (!anyRendered) {
+    container.innerHTML = '<div class="empty-state">No MLB games match your search.</div>';
+  }
 }
 
 function renderPropsTable(props) {
@@ -634,6 +689,10 @@ function renderPropsTable(props) {
 ["filter-market", "filter-source", "filter-hide-small"].forEach(id => {
   document.getElementById(id).addEventListener("change", renderGames);
 });
+document.getElementById("search-nfl").addEventListener("input", renderGames);
+document.getElementById("search-cfb").addEventListener("input", renderCfbGames);
+document.getElementById("search-nhl").addEventListener("input", renderNhlGames);
+document.getElementById("search-mlb").addEventListener("input", renderMlbGames);
 
 // ---------- Season Performance ----------
 const STRATEGY_LABELS = {
