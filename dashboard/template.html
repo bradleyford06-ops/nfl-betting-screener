@@ -167,6 +167,15 @@
     white-space: nowrap;
   }
   .subhead { color: var(--text-dim); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; margin: 14px 0 6px; }
+  .speculative-divider {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 22px 0 12px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
   .no-data-list { color: var(--text-dim); font-size: 0.85rem; }
   .no-data-list div { padding: 4px 0; }
 
@@ -221,6 +230,7 @@
         <option value="props_coverage">Coverage model</option>
       </select></label>
       <label><input type="checkbox" id="filter-hide-small"> Hide small-sample props</label>
+      <label><input type="checkbox" id="hide-speculative-nfl"> Hide speculative</label>
     </div>
     <div id="games-container"></div>
   </div>
@@ -230,6 +240,7 @@
     <div class="week-pills" id="cfb-week-pills"></div>
     <div class="controls">
       <input type="text" id="search-cfb" placeholder="Search team or matchup...">
+      <label><input type="checkbox" id="hide-speculative-cfb"> Hide speculative</label>
     </div>
     <div id="cfb-games-container"></div>
   </div>
@@ -239,6 +250,7 @@
     <div class="week-pills" id="nhl-week-pills"></div>
     <div class="controls">
       <input type="text" id="search-nhl" placeholder="Search team or matchup...">
+      <label><input type="checkbox" id="hide-speculative-nhl"> Hide speculative</label>
     </div>
     <div id="nhl-games-container"></div>
   </div>
@@ -248,6 +260,7 @@
     <div class="week-pills" id="mlb-week-pills"></div>
     <div class="controls">
       <input type="text" id="search-mlb" placeholder="Search team or matchup...">
+      <label><input type="checkbox" id="hide-speculative-mlb"> Hide speculative</label>
     </div>
     <div id="mlb-games-container"></div>
   </div>
@@ -309,6 +322,88 @@ function edgeBadgeClass(edge, isProp) {
   return "";
 }
 
+// Splits a week's games into non-speculative and speculative groups, each sorted by its
+// own top edge. A game with both kinds of picks appears once in each group, showing only
+// the flags relevant to that group — never both mixed in one card.
+function splitBySpeculative(games, searchTerm) {
+  const real = [];
+  const spec = [];
+  games.forEach(game => {
+    if (searchTerm && !game.matchup.toLowerCase().includes(searchTerm)) return;
+    const realFlags = game.game_flags.filter(f => !f.speculative);
+    const specFlags = game.game_flags.filter(f => f.speculative);
+    if (realFlags.length) {
+      real.push({ ...game, game_flags: realFlags, max_edge: Math.max(...realFlags.map(f => f.edge_score)) });
+    }
+    if (specFlags.length) {
+      spec.push({ ...game, game_flags: specFlags, max_edge: Math.max(...specFlags.map(f => f.edge_score)) });
+    }
+  });
+  real.sort((a, b) => b.max_edge - a.max_edge);
+  spec.sort((a, b) => b.max_edge - a.max_edge);
+  return { real, spec };
+}
+
+// Shared card renderer for the CFB/NHL/MLB tabs, whose game cards only ever show
+// game_flags (no props) — appends one card per game into `container`.
+function renderGameCards(container, games) {
+  games.forEach(game => {
+    const card = document.createElement("div");
+    card.className = "game-card";
+
+    const header = document.createElement("div");
+    header.className = "game-card-header";
+    header.innerHTML = `
+      <div>
+        <div class="game-matchup">${game.matchup}</div>
+        ${game.commence_time ? `<div class="game-meta">${formatGameTime(game.commence_time)}</div>` : ""}
+        <div class="game-meta">${game.game_flags.length} pick${game.game_flags.length===1?"":"s"}</div>
+      </div>
+      <div class="badge-row">
+        <span class="badge ${edgeBadgeClass(game.max_edge, false)}">top edge ${game.max_edge.toFixed(2)}</span>
+        <span class="chevron">&#9656;</span>
+      </div>`;
+    header.addEventListener("click", () => card.classList.toggle("open"));
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "game-card-body";
+    body.appendChild(renderGameFlagsTable(game.game_flags));
+    card.appendChild(body);
+    container.appendChild(card);
+  });
+}
+
+// Renders a full sport tab's games as two groups — non-speculative first, then a
+// "Speculative" divider and group — used by CFB/NHL/MLB, which share the same shape.
+function renderSpeculativeSplitTab(containerId, games, searchInputId, hideCheckboxId, emptyMessage) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = "";
+  if (!games || games.length === 0) {
+    container.innerHTML = `<div class="empty-state">${emptyMessage}</div>`;
+    return;
+  }
+
+  const searchTerm = document.getElementById(searchInputId).value.trim().toLowerCase();
+  const hideSpeculative = document.getElementById(hideCheckboxId).checked;
+  const { real, spec } = splitBySpeculative(games, searchTerm);
+
+  if (real.length === 0 && (hideSpeculative || spec.length === 0)) {
+    container.innerHTML = `<div class="empty-state">${emptyMessage}</div>`;
+    return;
+  }
+
+  renderGameCards(container, real);
+
+  if (!hideSpeculative && spec.length > 0) {
+    const divider = document.createElement("div");
+    divider.className = "speculative-divider";
+    divider.textContent = "Speculative";
+    container.appendChild(divider);
+    renderGameCards(container, spec);
+  }
+}
+
 function populateMarketFilter() {
   const markets = new Set();
   DATA.weeks.forEach(w => w.games.forEach(g => {
@@ -336,6 +431,46 @@ function renderWeekPills() {
   });
 }
 
+function renderNflGameCard(container, game) {
+  const card = document.createElement("div");
+  card.className = "game-card";
+
+  const header = document.createElement("div");
+  header.className = "game-card-header";
+  header.innerHTML = `
+    <div>
+      <div class="game-matchup">${game.matchup}</div>
+      <div class="game-meta">${formatGameTime(game.commence_time)}</div>
+      <div class="game-meta">${game.game_flags.length} side/total pick${game.game_flags.length===1?"":"s"}, ${game.props.length} prop${game.props.length===1?"":"s"}</div>
+    </div>
+    <div class="badge-row">
+      <span class="badge ${edgeBadgeClass(game.max_edge, game.max_edge < 3)}">top edge ${game.max_edge.toFixed(2)}</span>
+      <span class="chevron">&#9656;</span>
+    </div>`;
+  header.addEventListener("click", () => card.classList.toggle("open"));
+  card.appendChild(header);
+
+  const body = document.createElement("div");
+  body.className = "game-card-body";
+
+  if (game.game_flags.length) {
+    const sub = document.createElement("div");
+    sub.className = "subhead";
+    sub.textContent = "Sides & Totals";
+    body.appendChild(sub);
+    body.appendChild(renderGameFlagsTable(game.game_flags));
+  }
+  if (game.props.length) {
+    const sub = document.createElement("div");
+    sub.className = "subhead";
+    sub.textContent = "Player Props";
+    body.appendChild(sub);
+    body.appendChild(renderPropsTable(game.props));
+  }
+  card.appendChild(body);
+  container.appendChild(card);
+}
+
 function renderGames() {
   const container = document.getElementById("games-container");
   container.innerHTML = "";
@@ -349,8 +484,10 @@ function renderGames() {
   const sourceFilter = document.getElementById("filter-source").value;
   const hideSmall = document.getElementById("filter-hide-small").checked;
   const searchTerm = document.getElementById("search-nfl").value.trim().toLowerCase();
+  const hideSpeculative = document.getElementById("hide-speculative-nfl").checked;
 
-  let anyRendered = false;
+  const realGames = [];
+  const specGames = [];
 
   week.games.forEach(game => {
     if (searchTerm && !game.matchup.toLowerCase().includes(searchTerm)) return;
@@ -365,47 +502,33 @@ function renderGames() {
       (!hideSmall || !p.small_sample)
     );
 
-    if (gameFlags.length === 0 && props.length === 0) return;
-    anyRendered = true;
+    const realFlags = gameFlags.filter(f => !f.speculative);
+    const specFlags = gameFlags.filter(f => f.speculative);
 
-    const card = document.createElement("div");
-    card.className = "game-card";
-
-    const header = document.createElement("div");
-    header.className = "game-card-header";
-    header.innerHTML = `
-      <div>
-        <div class="game-matchup">${game.matchup}</div>
-        <div class="game-meta">${formatGameTime(game.commence_time)}</div>
-        <div class="game-meta">${gameFlags.length} side/total pick${gameFlags.length===1?"":"s"}, ${props.length} prop${props.length===1?"":"s"}</div>
-      </div>
-      <div class="badge-row">
-        <span class="badge ${edgeBadgeClass(game.max_edge, game.max_edge < 3)}">top edge ${game.max_edge.toFixed(2)}</span>
-        <span class="chevron">&#9656;</span>
-      </div>`;
-    header.addEventListener("click", () => card.classList.toggle("open"));
-    card.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "game-card-body";
-
-    if (gameFlags.length) {
-      const sub = document.createElement("div");
-      sub.className = "subhead";
-      sub.textContent = "Sides & Totals";
-      body.appendChild(sub);
-      body.appendChild(renderGameFlagsTable(gameFlags));
+    if (realFlags.length || props.length) {
+      const edgeSources = [...realFlags, ...props];
+      const maxEdge = edgeSources.length ? Math.max(...edgeSources.map(x => x.edge_score)) : 0;
+      realGames.push({ ...game, game_flags: realFlags, props, max_edge: maxEdge });
     }
-    if (props.length) {
-      const sub = document.createElement("div");
-      sub.className = "subhead";
-      sub.textContent = "Player Props";
-      body.appendChild(sub);
-      body.appendChild(renderPropsTable(props));
+    if (specFlags.length) {
+      specGames.push({ ...game, game_flags: specFlags, props: [], max_edge: Math.max(...specFlags.map(f => f.edge_score)) });
     }
-    card.appendChild(body);
-    container.appendChild(card);
   });
+
+  realGames.sort((a, b) => b.max_edge - a.max_edge);
+  specGames.sort((a, b) => b.max_edge - a.max_edge);
+
+  let anyRendered = realGames.length > 0 || (specGames.length > 0 && !hideSpeculative);
+
+  realGames.forEach(game => renderNflGameCard(container, game));
+
+  if (!hideSpeculative && specGames.length > 0) {
+    const divider = document.createElement("div");
+    divider.className = "speculative-divider";
+    divider.textContent = "Speculative";
+    container.appendChild(divider);
+    specGames.forEach(game => renderNflGameCard(container, game));
+  }
 
   if (week.no_data && week.no_data.length && !marketFilter && !sourceFilter) {
     anyRendered = true;
@@ -471,49 +594,12 @@ function renderCfbWeekPills() {
 }
 
 function renderCfbGames() {
-  const container = document.getElementById("cfb-games-container");
-  container.innerHTML = "";
   const week = DATA.cfb_weeks[currentCfbWeekIndex];
-  if (!week || week.games.length === 0) {
-    container.innerHTML = '<div class="empty-state">No CFB picks flagged right now.</div>';
-    return;
-  }
-
-  const searchTerm = document.getElementById("search-cfb").value.trim().toLowerCase();
-  let anyRendered = false;
-
-  week.games.forEach(game => {
-    if (searchTerm && !game.matchup.toLowerCase().includes(searchTerm)) return;
-    anyRendered = true;
-
-    const card = document.createElement("div");
-    card.className = "game-card";
-
-    const header = document.createElement("div");
-    header.className = "game-card-header";
-    header.innerHTML = `
-      <div>
-        <div class="game-matchup">${game.matchup}</div>
-        <div class="game-meta">${formatGameTime(game.commence_time)}</div>
-        <div class="game-meta">${game.game_flags.length} pick${game.game_flags.length===1?"":"s"}</div>
-      </div>
-      <div class="badge-row">
-        <span class="badge ${edgeBadgeClass(game.max_edge, false)}">top edge ${game.max_edge.toFixed(2)}</span>
-        <span class="chevron">&#9656;</span>
-      </div>`;
-    header.addEventListener("click", () => card.classList.toggle("open"));
-    card.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "game-card-body";
-    body.appendChild(renderGameFlagsTable(game.game_flags));
-    card.appendChild(body);
-    container.appendChild(card);
-  });
-
-  if (!anyRendered) {
-    container.innerHTML = '<div class="empty-state">No CFB games match your search.</div>';
-  }
+  renderSpeculativeSplitTab(
+    "cfb-games-container", week ? week.games : [],
+    "search-cfb", "hide-speculative-cfb",
+    "No CFB picks match right now."
+  );
 }
 
 // ---------- NHL ----------
@@ -538,48 +624,12 @@ function renderNhlWeekPills() {
 }
 
 function renderNhlGames() {
-  const container = document.getElementById("nhl-games-container");
-  container.innerHTML = "";
   const week = DATA.nhl_weeks[currentNhlWeekIndex];
-  if (!week || week.games.length === 0) {
-    container.innerHTML = '<div class="empty-state">No NHL picks flagged right now.</div>';
-    return;
-  }
-
-  const searchTerm = document.getElementById("search-nhl").value.trim().toLowerCase();
-  let anyRendered = false;
-
-  week.games.forEach(game => {
-    if (searchTerm && !game.matchup.toLowerCase().includes(searchTerm)) return;
-    anyRendered = true;
-
-    const card = document.createElement("div");
-    card.className = "game-card";
-
-    const header = document.createElement("div");
-    header.className = "game-card-header";
-    header.innerHTML = `
-      <div>
-        <div class="game-matchup">${game.matchup}</div>
-        <div class="game-meta">${game.game_flags.length} pick${game.game_flags.length===1?"":"s"}</div>
-      </div>
-      <div class="badge-row">
-        <span class="badge ${edgeBadgeClass(game.max_edge, game.max_edge < 3)}">top edge ${game.max_edge.toFixed(2)}</span>
-        <span class="chevron">&#9656;</span>
-      </div>`;
-    header.addEventListener("click", () => card.classList.toggle("open"));
-    card.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "game-card-body";
-    body.appendChild(renderGameFlagsTable(game.game_flags));
-    card.appendChild(body);
-    container.appendChild(card);
-  });
-
-  if (!anyRendered) {
-    container.innerHTML = '<div class="empty-state">No NHL games match your search.</div>';
-  }
+  renderSpeculativeSplitTab(
+    "nhl-games-container", week ? week.games : [],
+    "search-nhl", "hide-speculative-nhl",
+    "No NHL picks match right now."
+  );
 }
 
 // ---------- MLB ----------
@@ -598,48 +648,12 @@ function renderMlbWeekPills() {
 }
 
 function renderMlbGames() {
-  const container = document.getElementById("mlb-games-container");
-  container.innerHTML = "";
   const week = DATA.mlb_weeks[currentMlbWeekIndex];
-  if (!week || week.games.length === 0) {
-    container.innerHTML = '<div class="empty-state">No MLB picks flagged right now.</div>';
-    return;
-  }
-
-  const searchTerm = document.getElementById("search-mlb").value.trim().toLowerCase();
-  let anyRendered = false;
-
-  week.games.forEach(game => {
-    if (searchTerm && !game.matchup.toLowerCase().includes(searchTerm)) return;
-    anyRendered = true;
-
-    const card = document.createElement("div");
-    card.className = "game-card";
-
-    const header = document.createElement("div");
-    header.className = "game-card-header";
-    header.innerHTML = `
-      <div>
-        <div class="game-matchup">${game.matchup}</div>
-        <div class="game-meta">${game.game_flags.length} pick${game.game_flags.length===1?"":"s"}</div>
-      </div>
-      <div class="badge-row">
-        <span class="badge ${edgeBadgeClass(game.max_edge, game.max_edge < 3)}">top edge ${game.max_edge.toFixed(2)}</span>
-        <span class="chevron">&#9656;</span>
-      </div>`;
-    header.addEventListener("click", () => card.classList.toggle("open"));
-    card.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "game-card-body";
-    body.appendChild(renderGameFlagsTable(game.game_flags));
-    card.appendChild(body);
-    container.appendChild(card);
-  });
-
-  if (!anyRendered) {
-    container.innerHTML = '<div class="empty-state">No MLB games match your search.</div>';
-  }
+  renderSpeculativeSplitTab(
+    "mlb-games-container", week ? week.games : [],
+    "search-mlb", "hide-speculative-mlb",
+    "No MLB picks match right now."
+  );
 }
 
 function renderPropsTable(props) {
@@ -693,6 +707,10 @@ document.getElementById("search-nfl").addEventListener("input", renderGames);
 document.getElementById("search-cfb").addEventListener("input", renderCfbGames);
 document.getElementById("search-nhl").addEventListener("input", renderNhlGames);
 document.getElementById("search-mlb").addEventListener("input", renderMlbGames);
+document.getElementById("hide-speculative-nfl").addEventListener("change", renderGames);
+document.getElementById("hide-speculative-cfb").addEventListener("change", renderCfbGames);
+document.getElementById("hide-speculative-nhl").addEventListener("change", renderNhlGames);
+document.getElementById("hide-speculative-mlb").addEventListener("change", renderMlbGames);
 
 // ---------- Season Performance ----------
 const STRATEGY_LABELS = {
