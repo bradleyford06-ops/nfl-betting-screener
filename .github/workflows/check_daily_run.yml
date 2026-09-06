@@ -1,0 +1,52 @@
+name: Check Daily Run Completed
+
+# Watchdog for the recurring issue where GitHub silently skips every one of
+# screener.yml's scheduled cron triggers for a day (2026-08-28, 2026-09-02, 2026-09-06)
+# -- runs once daily, safely after noon ET in both daylight and standard time, and
+# emails an alert if no successful screener.yml run has completed yet today. GitHub
+# itself gives no notification when a scheduled trigger is skipped, so this is the
+# backstop that catches it instead of Bradley noticing a missing email on his own.
+on:
+  schedule:
+    - cron: '30 17 * * *'  # 17:30 UTC -- after noon ET year-round (noon EDT=16:00 UTC, noon EST=17:00 UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  check-daily-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install python-dotenv
+
+      - name: Check whether a successful screener run happened today
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          today=$(date -u +%Y-%m-%d)
+          count=$(gh run list --repo "${{ github.repository }}" --workflow=screener.yml \
+            --status=success --json createdAt --limit 20 \
+            | jq -r --arg today "$today" '[.[] | select(.createdAt | startswith($today))] | length')
+          echo "Successful screener runs today: $count"
+          if [ "$count" -ge 1 ]; then
+            echo "ran_today=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ran_today=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send alert if no successful run yet today
+        if: steps.check.outputs.ran_today != 'true'
+        run: |
+          echo "GMAIL_ADDRESS=${{ secrets.GMAIL_ADDRESS }}" >> .env
+          echo "GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}" >> .env
+          python -m scheduler.check_daily_run

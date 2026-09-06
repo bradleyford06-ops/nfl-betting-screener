@@ -71,6 +71,36 @@ What to do:
     _send(subject, body)
 
 
+def send_no_run_alert():
+    """
+    Email an alert when no successful screener run has completed by early afternoon —
+    called by check_daily_run.yml, which runs once daily safely after noon ET and checks
+    whether screener.yml has succeeded yet today. Exists because GitHub occasionally
+    skips a scheduled cron trigger silently (see screener.yml's own comment on this,
+    recurring incidents 2026-08-28, 2026-09-02, 2026-09-06) and gives no notification
+    when it happens — this is the backstop for "all of today's scheduled attempts got
+    skipped," not for an error inside the run itself (send_error_alert covers that).
+    """
+    if not SENDER or not APP_PASSWORD:
+        print("ERROR ALERT: Cannot send — Gmail credentials not set. No successful run detected today.")
+        return
+
+    subject = "NFL Betting Screener — No Run Detected Today"
+    body = """No successful screener run has completed today, even though several scheduled
+attempts should have fired by now.
+
+This usually means GitHub silently skipped every one of today's scheduled cron
+triggers — a known, recurring platform issue, not a bug in the screener itself.
+
+What to do:
+- Trigger a run manually: gh workflow run screener.yml
+- Or forward this email to your Claude Code session and ask it to trigger and verify one
+
+— NFL Betting Screener
+"""
+    _send(subject, body)
+
+
 def _send(subject, body):
     try:
         msg = MIMEText(body)

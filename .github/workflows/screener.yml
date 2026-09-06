@@ -3,16 +3,20 @@ name: NFL Betting Screener
 # GitHub doesn't guarantee scheduled-trigger timing -- it can delay or silently skip a
 # cron firing under platform load, and does not notify when that happens. Found in
 # production 2026-08-28: the 13:00 UTC trigger drifted later each day (30-60min late,
-# then 53min, then 9h48m late) before skipping entirely on this date. Two backup cron
-# times cover that gap; the "already ran today?" check below (schedule-only, manual
-# runs always execute) makes retries safe -- whichever attempt actually fires first does
-# the real work and any later ones that day just no-op instead of duplicating the run,
-# the email, and the commit.
+# then 53min, then 9h48m late) before skipping entirely on this date. Recurred worse on
+# 2026-09-02 (two consecutive triggers skipped the same day) and again on 2026-09-06
+# (13:00 skipped, didn't actually fire until the 15:00 backup, ~58min late) -- a fourth
+# backup was added after that second recurrence. The "already ran today?" check below
+# (schedule-only, manual runs always execute) makes retries safe -- whichever attempt
+# actually fires first does the real work and any later ones that day just no-op instead
+# of duplicating the run, the email, and the commit. See also
+# check_daily_run.yml, which alerts if even all four backups get skipped.
 on:
   schedule:
     - cron: '0 13 * * *'   # 13:00 UTC = 9AM ET / 6AM PT -- primary
     - cron: '0 15 * * *'   # 15:00 UTC -- backup if the primary didn't fire
-    - cron: '0 17 * * *'   # 17:00 UTC -- final backup
+    - cron: '0 17 * * *'   # 17:00 UTC -- second backup
+    - cron: '0 19 * * *'   # 19:00 UTC -- third/final backup
   workflow_dispatch:
 
 permissions:
