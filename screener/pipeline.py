@@ -25,7 +25,7 @@ from model.nhl_power_ratings import (
 )
 from model.mlb_power_ratings import (
     compute_mlb_team_ratings, compute_park_factors, compute_pitcher_ratings, predict_mlb_matchup,
-    screen_mlb_moneyline, screen_mlb_runline, screen_mlb_total, RUN_LINE,
+    screen_mlb_moneyline, screen_mlb_total,
 )
 from model.player_trends import (
     screen_player_prop, player_current_team, has_nfl_history,
@@ -374,11 +374,17 @@ def get_mlb_stats_years():
 
 def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window=8):
     """
-    Screen today's/tomorrow's MLB games (moneyline, run line, total) against our
-    pitcher- and park-adjusted power-rating model. Run line has a real backtested edge
-    (see backtest/run_mlb_backtest.py); moneyline and total do not, so their flags are
-    kept separate as speculative rather than mixed into the main results — same
-    treatment the NFL/CFB total models get.
+    Screen today's/tomorrow's MLB games (moneyline, total) against our pitcher- and
+    park-adjusted power-rating model. Moneyline has a real backtested edge (favorite-
+    only, see MONEYLINE_EDGE_THRESHOLD); total does not, so it's kept separate as
+    speculative rather than mixed into the main results — same treatment the NFL/CFB
+    total models get.
+
+    Run line is DISABLED (2026-09-06, see RUNLINE_EDGE_THRESHOLD in
+    model/mlb_power_ratings.py for the full investigation) — a real grading bug plus
+    three follow-up investigations (calibration, breakeven-vs-real-odds, lineup-based
+    offense) all confirmed there's no fixable edge here, the same structural-limit
+    pattern already found for NFL moneyline.
 
     Unlike NHL, MLB's own schedule API already publishes probable starting pitchers
     days ahead, so there's no goalie-style confirmation problem to work around — the
@@ -395,7 +401,7 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
     for _, row in upcoming.iterrows():
         schedule_by_teams.setdefault((row["home_team"], row["away_team"]), []).append(row)
 
-    games = get_game_odds(markets="h2h,spreads,totals", sport=MLB_SPORT)
+    games = get_game_odds(markets="h2h,totals", sport=MLB_SPORT)  # "spreads" (run line) dropped -- disabled, see docstring above
     flags = []
     speculative_flags = []
 
@@ -446,7 +452,6 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
 
         total_lines, total_prices = [], []
         home_ml_quotes, away_ml_quotes = [], []
-        home_rl_quotes, away_rl_quotes = [], []
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
                 if market["key"] == "h2h":
@@ -455,12 +460,6 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
                             home_ml_quotes.append(outcome["price"])
                         elif outcome["name"] == away_full:
                             away_ml_quotes.append(outcome["price"])
-                elif market["key"] == "spreads":
-                    for outcome in market["outcomes"]:
-                        if outcome["name"] == home_full:
-                            home_rl_quotes.append((outcome["price"], outcome["point"]))
-                        elif outcome["name"] == away_full:
-                            away_rl_quotes.append((outcome["price"], outcome["point"]))
                 elif market["key"] == "totals":
                     for outcome in market["outcomes"]:
                         if outcome["name"] == "Over":
@@ -469,9 +468,6 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
 
         home_ml = average_price(home_ml_quotes)
         away_ml = average_price(away_ml_quotes)
-
-        home_rl_odds, home_rl_point = consensus_price_and_point(home_rl_quotes)
-        away_rl_odds, away_rl_point = consensus_price_and_point(away_rl_quotes)
 
         pitcher_caveat = (
             "" if pitchers_confirmed else
@@ -488,14 +484,6 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
             if flag:
                 flag["explanation"] += pitcher_caveat
                 flag["price"] = flag["market_odds"]
-                flags.append({**flag, **game_context})
-
-        if home_rl_odds is not None and away_rl_odds is not None:
-            flag = screen_mlb_runline(prediction, home_rl_odds, home_rl_point, away_rl_odds, away_rl_point)
-            if flag:
-                flag["explanation"] += pitcher_caveat
-                flag["price"] = flag["market_odds"]
-                flag["market_line"] = RUN_LINE
                 flags.append({**flag, **game_context})
 
         if total_lines:

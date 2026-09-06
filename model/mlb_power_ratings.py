@@ -36,18 +36,40 @@ RUN_LINE = 1.5  # the MLB run line is essentially always fixed at +/-1.5 runs; b
 # backtest/run_mlb_backtest.py --sweep). A single-season (2018-only) test run looked
 # promising for moneyline (51.7% win rate, +14.6% ROI at edge>=0.30) but that turned out
 # to be noise -- the full 4-season sample reversed it completely.
-#   - Run line: originally reported as the strongest edge in the project (55.4% win
-#     rate/+10.6% ROI, climbing to 59.6%/+25.5%) but that number came from a real bug --
-#     screen_mlb_runline assumed the home team was always the -1.5 favorite, when
-#     either team can be (see 2026-08-24 fix). Refixed and re-backtested: blended
-#     favorite+underdog picks showed NO edge at any threshold (49.3% win rate/-3.4% ROI
-#     unfiltered, negative throughout the sweep). Splitting the two sides apart found
-#     the real story -- favorite-side picks are genuinely good (52.9% win rate/+15.1%
-#     ROI unfiltered, positive at every threshold tested) while underdog-side picks are
-#     genuinely bad (46.0%/-20.6%, negative at every threshold) -- so screen_mlb_runline
-#     now only ever flags the favorite side. Unlike every other threshold in this
-#     project, ROI here is *highest* with no minimum edge and gently declines as edge
-#     grows, so RUNLINE_EDGE_THRESHOLD is 0 -- any positive favorite-side edge qualifies.
+#   - Run line: DISABLED (2026-09-06) -- see screener/pipeline.py. Was live as "the
+#     strongest edge in the project" (55.4% win rate/+10.6% ROI, climbing to 59.6%/
+#     +25.5%), then re-reported as 52.9% win rate/+15.1% ROI favorite-only after a
+#     2026-08-24 fix (screen_mlb_runline previously assumed the home team was always
+#     the -1.5 favorite, when either team can be). Both of those numbers turned out to
+#     be built on a SECOND, separate bug found 2026-09-06 by Bradley noticing the live
+#     dashboard crediting wins that hadn't actually covered -1.5: the GRADING code
+#     (screener/reconcile.py and backtest/simulate_mlb.py) had the identical home/away
+#     assumption baked in as the pick-selection code, just never fixed when that was.
+#     Once grading was corrected, live results reversed (50.6%/+25.9% -> 34.4%/-12.8%,
+#     93 bets) and the full 2018-2021 backtest reversed with it -- NO threshold from
+#     edge>=0.00 to edge>=0.30 shows a positive ROI (range: -5.7% to -12.8%, 4,491 bets).
+#     Investigated three further angles before disabling, at Bradley's request, rather
+#     than disabling on the grading fix alone: (1) calibration -- the model's own stated
+#     cover probability is badly overconfident (77%-confidence bucket covers only 48.3%
+#     of the time in reality, vs. the market's own probabilities which stay well-
+#     calibrated on the same games), but widening the std dev used to compute it (the
+#     same fix that repaired MONEYLINE_MARGIN_STD_DEV) across a wide sweep (4.53-16)
+#     left ROI flat at roughly -6% throughout -- ruling out a simple calibration bug;
+#     (2) plus-money breakeven math -- run-line favorites are usually plus-money
+#     (avg +58, 70% of bets), but even so the actual win rate falls short of the real
+#     breakeven implied by the real average odds in every confidence bucket, worst at
+#     the model's most-confident bucket (53.1% needed vs. 48.3% actual) since the model's
+#     confidence tracks bigger favorites, which get worse (more minus-money) prices;
+#     (3) lineup-based offense -- tested whether today's actual starting 9 (vs. the
+#     team's typical lineup) explains any of what the team-level model gets wrong, both
+#     naively (20-game trailing OPS: -0.09 to -0.15 correlation, wrong direction) and
+#     with a properly regressed multi-season projection (blended current+prior season,
+#     regressed toward league average by sample size, K swept 0-600): correlation
+#     shrank toward zero as regression strength increased (-0.052 -> -0.035), the exact
+#     signature of diluting pure noise, not uncovering real signal. Conclusion: this is
+#     not a fixable calibration or data problem, the model's inputs don't predict which
+#     run-line favorite covers -1.5 -- same structural-limit pattern as NFL moneyline.
+#     RUNLINE_EDGE_THRESHOLD kept below for the backtest harness only.
 #   - Moneyline: originally reported as no edge anywhere, but that verdict was built on
 #     the same two flaws run line had -- underdog picks blended in with favorite picks,
 #     and a systematically overconfident win-probability estimate (see
