@@ -156,12 +156,15 @@ def grade_flag(flag, game, odds_row):
         return ("win" if flag["side"] == winner else "loss"), flag["market_odds"]
 
     if flag["market"] == "runline":
-        home_covers = home_margin > RUN_LINE
-        away_covers = home_margin < RUN_LINE  # exact complement -- run margins are integers, same reasoning as the NHL puck-line fix
-        if flag["side"].startswith(game["home_team"]):
-            return ("win" if home_covers else "loss"), flag["market_odds"]
-        else:
-            return ("win" if away_covers else "loss"), flag["market_odds"]
+        # screen_mlb_runline only ever flags the -1.5 favorite, never the +1.5 underdog,
+        # and either team (home or away) can be that favorite -- so covering always means
+        # the picked team winning by more than 1.5 runs. A prior version of this grading
+        # assumed the picked side's home/away status determined which direction to check
+        # (home_covers/away_covers as exact complements), which is only correct when the
+        # home team happens to be the favorite -- wrong, and silently so, whenever the
+        # away team was the favorite. Found 2026-09-06 -- see CLAUDE.md.
+        picked_margin = home_margin if flag["side"].startswith(game["home_team"]) else -home_margin
+        return ("win" if picked_margin > RUN_LINE else "loss"), flag["market_odds"]
 
     if flag["market"] == "total":
         actual_total = game["home_score"] + game["away_score"]

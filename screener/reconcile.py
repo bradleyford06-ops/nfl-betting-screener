@@ -66,13 +66,17 @@ def grade_game_pick(pick, home_score, away_score):
         return "won" if pick["side"] == winner else "lost"
 
     if pick["market"] == "runline":
-        # The run line is always +/-1.5 (see model/mlb_power_ratings.py's RUN_LINE) --
-        # margins are integers, so home/away covering are exact complements, same
-        # reasoning as the NHL puck-line grading fix.
+        # screen_mlb_runline only ever flags the market's -1.5 favorite going forward
+        # (never the +1.5 underdog -- see model/mlb_power_ratings.py), but the ledger
+        # still holds some +1.5 underdog picks from before that 2026-08-24 fix, so this
+        # grades generally rather than assuming every pick is a favorite. Either team,
+        # home or away, can be the favorite, so which side actually needs to clear +1.5
+        # runs is read from the sign in pick["side"] itself, not assumed from home/away
+        # (a real bug found 2026-09-06 -- see CLAUDE.md).
         home_margin = home_score - away_score
-        if pick["side"].startswith(pick["home_team"]):
-            return "won" if home_margin > 1.5 else "lost"
-        return "won" if home_margin < 1.5 else "lost"
+        picked_margin = home_margin if pick["side"].startswith(pick["home_team"]) else -home_margin
+        threshold = -1.5 if "+1.5" in pick["side"] else 1.5
+        return "won" if picked_margin > threshold else "lost"
 
     return None
 
