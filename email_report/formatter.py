@@ -81,8 +81,10 @@ def format_email(results):
     if mlb_games:
         lines.append(f"MLB — RUN LINE  ({len(mlb_games)} flagged)")
         lines.append("Our own opponent-adjusted power rating, pitcher-form and park-factor")
-        lines.append("adjusted. Backtested with a real edge (2018-2021, 56.5% win rate, +13.9% ROI")
-        lines.append("at the live threshold) — the strongest signal found in this project so far.")
+        lines.append("adjusted. UNDER ACTIVE INVESTIGATION (2026-09-06): a grading bug was found")
+        lines.append("in both the live results and the backtest that originally validated this")
+        lines.append("as a proven edge — corrected numbers show a loss at every threshold tested.")
+        lines.append("Treat these picks as unproven, not reliable, until this is resolved.")
         lines.append("=" * 60)
         lines.append("")
         for i, game in enumerate(mlb_games, 1):
