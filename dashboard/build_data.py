@@ -35,6 +35,21 @@ def _game_key(home_team, away_team):
     return f"{away_team} @ {home_team}"
 
 
+def _display_line(pick):
+    """The line as it actually applies to the picked side, not the raw stored value.
+    Spread picks always store their line anchored to the home team's perspective
+    (negative = home favored) since that's what grading needs regardless of which side
+    was picked — but showing that raw number next to the away team is wrong whenever the
+    away side was picked: a real +3.5 underdog would display as -3.5, looking like a
+    3.5-point favorite instead. Found 2026-09-08 when Bradley caught exactly this on a
+    South Florida @ Army pick. Other markets (total, moneyline, runline/puckline) aren't
+    home-anchored this way and pass through unchanged."""
+    line = pick.get("line")
+    if pick["market"] == "spread" and line is not None and pick["side"] != pick["home_team"]:
+        return -line
+    return line
+
+
 def _drop_stale_picks(open_picks, cutoff_hours=STALE_PICK_CUTOFF_HOURS):
     """Keep only picks a run has actually refreshed recently — see STALE_PICK_CUTOFF_HOURS."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=cutoff_hours)
@@ -104,7 +119,7 @@ def build_this_week_data(open_picks, no_data=None):
             "market": pick["market"],
             "market_label": GAME_MARKET_LABELS.get(pick["market"], pick["market"]),
             "side": pick["side"],
-            "line": pick.get("line"),
+            "line": _display_line(pick),
             "price": pick.get("price"),
             "edge_score": pick["edge_score"],
             "explanation": pick.get("explanation"),
@@ -182,7 +197,7 @@ def _build_speculative_week_data(open_picks, strategy_prefix):
             "market": pick["market"],
             "market_label": GAME_MARKET_LABELS.get(pick["market"], pick["market"]),
             "side": pick["side"],
-            "line": pick.get("line"),
+            "line": _display_line(pick),
             "price": pick.get("price"),
             "edge_score": pick["edge_score"],
             "explanation": pick.get("explanation"),

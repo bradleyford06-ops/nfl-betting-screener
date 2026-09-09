@@ -243,6 +243,11 @@ def screen_cfb_spread(prediction, market_spread_home, edge_threshold=SPREAD_EDGE
         return None
 
     side = prediction["home_team"] if edge > 0 else prediction["away_team"]
+    predicted_margin = prediction["predicted_spread"]
+    prediction_text = (
+        f"{prediction['home_team']} wins by {predicted_margin:.1f}" if predicted_margin >= 0
+        else f"{prediction['away_team']} wins by {-predicted_margin:.1f}"
+    )
     return {
         "market": "spread",
         "side": side,
@@ -250,7 +255,7 @@ def screen_cfb_spread(prediction, market_spread_home, edge_threshold=SPREAD_EDGE
         "predicted_spread": prediction["predicted_spread"],
         "edge_score": round(abs(edge), 1),
         "explanation": (
-            f"Model predicts {prediction['home_team']} wins by {prediction['predicted_spread']}, "
+            f"Model predicts {prediction_text}, "
             f"vs. a market line implying a {market_home_margin:+.1f} home margin — "
             f"{abs(edge):.1f} points of disagreement favors {side}."
         ),
