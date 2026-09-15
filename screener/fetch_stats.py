@@ -8,42 +8,40 @@ STATS_CACHE_TTL_HOURS = 20  # NFL stats only update after games, so a long cache
 
 # nflverse's own weekly player-stats release (used below) stalled after the 2024 season and
 # stopped publishing -- found 2026-09-15 by checking its release timestamps directly (last
-# updated May 2025). When a requested year isn't in that release, this falls back to NFL's
-# own Next Gen Stats data instead of silently going without: same nflverse pipeline, same
-# nfl_data_py library, but a separate release that's kept current (verified same-day). NGS
-# splits passing/rushing/receiving into three files with different column names and no
-# opponent field, so this maps each onto the schema the rest of the app already expects.
-# Known gaps: NGS's receiving file only tracks WR/TE (no RB receiving), and its rushing
-# file only tracks RB (no QB rushing) -- those specific props simply won't resolve while
-# this fallback is covering a season, same as any other player with no matching data (see
-# resolve_player_display_name in model/player_trends.py). Everything else PROP_STAT_MAP
-# screens is fully covered: QB passing, RB rushing, WR/TE receiving.
-NGS_STAT_RENAME = {
+# updated May 2025). When a requested year isn't in that release, this falls back to
+# rebuilding the same box scores directly from play-by-play instead of silently going
+# without: same nflverse pipeline, same nfl_data_py library, but the raw-plays release is
+# actively current (confirmed 2025 and 2026 files exist, updated same-day). An earlier
+# version of this fallback used NFL's Next Gen Stats data instead, since it's already
+# aggregated to weekly box scores -- but NGS splits passing/rushing/receiving into three
+# files that each only cover certain positions (its receiving file excludes running backs,
+# its rushing file excludes quarterbacks), and patching those gaps by cross-referencing
+# play-by-play anyway turned out messier than just using play-by-play as the one source.
+# Raw plays are tagged by the actual player on every play regardless of position, so
+# aggregating them ourselves has no such gap. Verified against NGS's own numbers for a
+# category it does cover (passing) -- exact match.
+PBP_STAT_AGG = {
     "passing": {
-        "player_gsis_id": "player_id", "player_position": "position", "team_abbr": "recent_team",
-        "pass_yards": "passing_yards", "pass_touchdowns": "passing_tds",
+        "player_col": "passer_player_id", "attempt_col": "pass_attempt",
+        "agg": {"completions": ("complete_pass", "sum"), "attempts": ("pass_attempt", "sum"),
+                "passing_yards": ("passing_yards", "sum"), "passing_tds": ("pass_touchdown", "sum")},
     },
     "rushing": {
-        "player_gsis_id": "player_id", "player_position": "position", "team_abbr": "recent_team",
-        "rush_attempts": "carries", "rush_yards": "rushing_yards", "rush_touchdowns": "rushing_tds",
+        "player_col": "rusher_player_id", "attempt_col": "rush_attempt",
+        "agg": {"carries": ("rush_attempt", "sum"), "rushing_yards": ("rushing_yards", "sum"),
+                "rushing_tds": ("rush_touchdown", "sum")},
     },
     "receiving": {
-        "player_gsis_id": "player_id", "player_position": "position", "team_abbr": "recent_team",
-        "yards": "receiving_yards", "rec_touchdowns": "receiving_tds",
+        "player_col": "receiver_player_id", "attempt_col": "pass_attempt",
+        "agg": {"targets": ("pass_attempt", "sum"), "receptions": ("complete_pass", "sum"),
+                "receiving_yards": ("receiving_yards", "sum"), "receiving_tds": ("pass_touchdown", "sum")},
     },
 }
-NGS_STAT_COLUMNS = {
-    "passing": ["completions", "attempts", "passing_yards", "passing_tds"],
-    "rushing": ["carries", "rushing_yards", "rushing_tds"],
-    "receiving": ["receptions", "targets", "receiving_yards", "receiving_tds"],
-}
-NGS_JOIN_KEYS = ["player_id", "player_display_name", "season", "week", "season_type"]
-NGS_TEAM_KEYS = ["position", "recent_team"]
 
 
 def _opponent_lookup(schedules_df, year):
-    """(week, team) -> opponent for one season, built from the schedule -- NGS doesn't
-    include an opponent column the way nflverse's own weekly stats does."""
+    """(week, team) -> opponent for one season, built from the schedule -- play-by-play
+    doesn't include an opponent column the way nflverse's own weekly stats does."""
     season_games = schedules_df[schedules_df["season"] == year]
     home = season_games[["week", "home_team", "away_team"]].rename(
         columns={"home_team": "team", "away_team": "opponent"})
@@ -53,52 +51,51 @@ def _opponent_lookup(schedules_df, year):
     return both.set_index(["week", "team"])["opponent"]
 
 
-def _weekly_stats_from_ngs(year, schedules_df):
-    """Build a weekly_df-shaped frame for one season from Next Gen Stats -- see the module
-    docstring above for why this exists and its known gaps: NGS's receiving file only
-    tracks WR/TE (no RB receiving) and its rushing file only tracks RB (no QB rushing).
-    Rather than assume exactly which positions each NGS file covers, each source frame is
-    tagged with whether a row actually came from it, and only rows that did get their stat
-    columns zero-filled -- a row with no match in a category's own file (e.g. a running
-    back in the receiving file) stays unmatched (NaN), not a false real zero."""
+def _weekly_stats_from_pbp(year, schedules_df):
+    """Build a weekly_df-shaped frame for one season directly from play-by-play -- see the
+    module docstring above for why. Player identity (display name, position) comes from
+    nflverse's player roster table, joined on the GSIS ID play-by-play already tags every
+    play with; opponent comes from the schedule the same way NGS-based reconstruction did."""
     import nfl_data_py as nfl
 
+    pbp = nfl.import_pbp_data([year], downcast=True)
+
     frames = []
-    for stat_type, rename in NGS_STAT_RENAME.items():
-        stat_df = nfl.import_ngs_data(stat_type, [year])
-        stat_df = stat_df[stat_df["week"] > 0]  # week 0 is a season-to-date summary row, not a real game
-        stat_df = stat_df.rename(columns=rename)
-        stat_df = stat_df[NGS_JOIN_KEYS + NGS_TEAM_KEYS + NGS_STAT_COLUMNS[stat_type]].copy()
-        stat_df[f"_has_{stat_type}"] = True
+    for stat_type, config in PBP_STAT_AGG.items():
+        stat_df = (
+            pbp[pbp[config["attempt_col"]] == 1]
+            .groupby([config["player_col"], "posteam", "season", "week"])
+            .agg(**config["agg"])
+            .reset_index()
+            .rename(columns={config["player_col"]: "player_id", "posteam": "recent_team"})
+        )
         frames.append(stat_df)
 
     merged = frames[0]
     for frame in frames[1:]:
-        merged = merged.merge(frame, on=NGS_JOIN_KEYS, how="outer", suffixes=("", "_dup"))
-        for col in NGS_TEAM_KEYS:
-            dup_col = f"{col}_dup"
-            merged[col] = merged[col].combine_first(merged[dup_col])
-            merged = merged.drop(columns=[dup_col])
+        merged = merged.merge(frame, on=["player_id", "recent_team", "season", "week"], how="outer")
 
-    for stat_type, cols in NGS_STAT_COLUMNS.items():
-        had_category = merged[f"_has_{stat_type}"].fillna(False)
-        merged.loc[had_category, cols] = merged.loc[had_category, cols].fillna(0.0)
-        merged = merged.drop(columns=[f"_has_{stat_type}"])
+    stat_columns = [col for config in PBP_STAT_AGG.values() for col in config["agg"]]
+    merged[stat_columns] = merged[stat_columns].fillna(0.0)
+
+    players = nfl.import_players()[["gsis_id", "display_name", "position"]].rename(
+        columns={"gsis_id": "player_id", "display_name": "player_display_name"})
+    merged = merged.merge(players, on="player_id", how="left").dropna(subset=["player_display_name", "position"])
 
     opponent_lookup = _opponent_lookup(schedules_df, year)
     lookup_keys = list(zip(merged["week"], merged["recent_team"]))
     merged["opponent_team"] = [opponent_lookup.get(k) for k in lookup_keys]
 
-    return merged.dropna(subset=["opponent_team", "position"])
+    return merged.dropna(subset=["opponent_team"])
 
 
 def get_weekly_player_stats(years):
     """
     Fetch per-player, per-game stats for the given season(s) via nfl_data_py, with caching.
     A given season's file isn't published until nflverse processes it -- when that happens,
-    falls back to building the equivalent frame from Next Gen Stats instead of silently
-    skipping the season (see _weekly_stats_from_ngs above for why and its one known gap).
-    Any year where even that fallback fails is skipped rather than failing the whole fetch.
+    falls back to rebuilding the same box scores from play-by-play instead of silently
+    skipping the season -- see _weekly_stats_from_pbp above. Any year where even that
+    fallback fails is skipped rather than failing the whole fetch.
     """
     cache_key = f"weekly_stats_{'-'.join(str(y) for y in years)}"
     cached = get_cached(cache_key, STATS_CACHE_TTL_HOURS)
@@ -113,12 +110,12 @@ def get_weekly_player_stats(years):
             frames.append(nfl.import_weekly_data([year]))
             continue
         except Exception as e:
-            logger.warning(f"nflverse weekly stats not available for {year} ({e}) -- falling back to Next Gen Stats.")
+            logger.warning(f"nflverse weekly stats not available for {year} ({e}) -- falling back to play-by-play.")
 
         try:
-            frames.append(_weekly_stats_from_ngs(year, get_schedules([year])))
+            frames.append(_weekly_stats_from_pbp(year, get_schedules([year])))
         except Exception as e:
-            logger.warning(f"Next Gen Stats fallback also failed for {year}: {e}")
+            logger.warning(f"Play-by-play fallback also failed for {year}: {e}")
 
     if not frames:
         raise RuntimeError(f"No weekly player stats available for any of {years}")
