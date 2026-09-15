@@ -97,7 +97,13 @@ def _find_prop_actual(weekly_df, player_name, season, week, stat_column):
     if match.empty:
         return None
     value = match.iloc[0][stat_column]
-    return None if pd.isna(value) else value
+    # float(), not the raw numpy scalar -- weekly_df's stat columns are numpy.float32 (from
+    # play-by-play/NGS's downcast=True), and sqlite3 has no adapter for that type, so it
+    # silently stores the value as an opaque BLOB instead of the REAL the schema declares.
+    # Grading itself was never affected (the comparison happens before storage), but the
+    # stored actual_value was unusable by anything reading it back as a number. Found by
+    # checking typeof(actual_value) in the ledger after reconciling props for the first time.
+    return None if pd.isna(value) else float(value)
 
 
 def grade_prop_pick(pick, actual_value):
