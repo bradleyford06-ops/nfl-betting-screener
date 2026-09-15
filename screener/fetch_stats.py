@@ -39,6 +39,38 @@ PBP_STAT_AGG = {
 }
 
 
+SKILL_POSITIONS = {"QB", "RB", "WR", "TE", "FB"}
+
+
+def _active_skill_players(year):
+    """(player_id, season, week, recent_team) for every skill-position player confirmed to
+    have taken a real offensive snap that game, via snap counts -- lets _weekly_stats_from_pbp
+    tell a genuinely-zero game (on the field, never targeted or handed the ball) apart from
+    a player who didn't play at all. Without this, a player with a real zero-stat game (e.g.
+    a TE who played 20 snaps but was never thrown to) has no row anywhere in the play-by-play
+    aggregation, so a prop pick on them can never be graded even though the real answer (0,
+    so an Over line loses) is knowable -- found live via Erick All and Calvin Ridley picks
+    stuck open after a real week's games had already completed. Snap counts use PFR's own
+    player IDs, not the GSIS IDs the rest of this file keys on, so this joins through
+    nflverse's own id crosswalk (nfl.import_ids)."""
+    cache_key = f"active_skill_players_{year}"
+    cached = get_cached(cache_key, STATS_CACHE_TTL_HOURS)
+    if cached is not None:
+        return pd.DataFrame(cached)
+
+    import nfl_data_py as nfl
+    snaps = nfl.import_snap_counts([year])
+    snaps = snaps[snaps["position"].isin(SKILL_POSITIONS) & (snaps["offense_snaps"] > 0)]
+
+    id_crosswalk = nfl.import_ids()[["pfr_id", "gsis_id"]].dropna(subset=["pfr_id", "gsis_id"])
+    active = snaps.merge(id_crosswalk, left_on="pfr_player_id", right_on="pfr_id", how="inner")
+    active = active[["gsis_id", "season", "week", "team"]].rename(
+        columns={"gsis_id": "player_id", "team": "recent_team"}).drop_duplicates()
+
+    save_cache(cache_key, active.to_dict(orient="records"))
+    return active
+
+
 def _opponent_lookup(schedules_df, year):
     """(week, team) -> opponent for one season, built from the schedule -- play-by-play
     doesn't include an opponent column the way nflverse's own weekly stats does."""
@@ -74,6 +106,10 @@ def _weekly_stats_from_pbp(year, schedules_df):
     merged = frames[0]
     for frame in frames[1:]:
         merged = merged.merge(frame, on=["player_id", "recent_team", "season", "week"], how="outer")
+
+    # Add a row for anyone confirmed to have played but who has no row yet in any category
+    # above (a real zero-stat game) -- see _active_skill_players.
+    merged = merged.merge(_active_skill_players(year), on=["player_id", "recent_team", "season", "week"], how="outer")
 
     stat_columns = [col for config in PBP_STAT_AGG.values() for col in config["agg"]]
     merged[stat_columns] = merged[stat_columns].fillna(0.0)
