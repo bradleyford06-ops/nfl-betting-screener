@@ -28,7 +28,7 @@ from model.mlb_power_ratings import (
     screen_mlb_moneyline, screen_mlb_total,
 )
 from model.player_trends import (
-    screen_player_prop, player_current_team, has_nfl_history,
+    screen_player_prop, player_current_team, resolve_player_display_name,
     get_position_stat_ratings, player_adjusted_average,
 )
 from model.coverage_sim import (
@@ -646,7 +646,8 @@ def run_props_screener(weekly_df, schedules_df, name_map, current_season, curren
             prices = prices_by_player_market[(market_key, player_name)]
             avg_price = sum(prices) / len(prices)
 
-            if not has_nfl_history(weekly_df, player_name):
+            resolved_name = resolve_player_display_name(weekly_df, player_name)
+            if resolved_name is None:
                 no_data.append({
                     "player": player_name,
                     "market": market_key,
@@ -655,7 +656,7 @@ def run_props_screener(weekly_df, schedules_df, name_map, current_season, curren
                 })
                 continue
 
-            player_team = player_current_team(weekly_df, player_name)
+            player_team = player_current_team(weekly_df, resolved_name)
             if player_team == home_abbr:
                 opponent = away_abbr
             elif player_team == away_abbr:
@@ -663,7 +664,7 @@ def run_props_screener(weekly_df, schedules_df, name_map, current_season, curren
             else:
                 continue  # has history, but team doesn't match this game — skip rather than guess
 
-            flag = screen_player_prop(weekly_df, player_name, market_key, opponent, avg_line, games_window, ratings_cache)
+            flag = screen_player_prop(weekly_df, resolved_name, market_key, opponent, avg_line, games_window, ratings_cache)
             if flag:
                 flag.update({
                     "price": avg_price, "season": season, "week": week,
@@ -725,13 +726,15 @@ def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, current_sea
             avg_line = sum(lines) / len(lines)
             avg_price = sum(prices_by_player_market[(market_key, player_name)]) / len(prices_by_player_market[(market_key, player_name)])
 
-            player_rows = weekly_df[weekly_df["player_display_name"] == player_name]
-            if player_rows.empty:
+            resolved_name = resolve_player_display_name(weekly_df, player_name)
+            if resolved_name is None:
                 continue  # no history — already surfaced by the trend model's "no data yet" list
+
+            player_rows = weekly_df[weekly_df["player_display_name"] == resolved_name]
             player_id = player_rows["player_id"].iloc[-1]
             position = player_rows["position"].iloc[-1]
 
-            player_team = player_current_team(weekly_df, player_name)
+            player_team = player_current_team(weekly_df, resolved_name)
             if player_team == home_abbr:
                 opponent = away_abbr
             elif player_team == away_abbr:
@@ -740,7 +743,7 @@ def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, current_sea
                 continue
 
             target_ratings = get_position_stat_ratings(weekly_df, position, "targets", target_ratings_cache)
-            player_avg_targets, _ = player_adjusted_average(weekly_df, player_name, "targets", target_ratings, games_window)
+            player_avg_targets, _ = player_adjusted_average(weekly_df, resolved_name, "targets", target_ratings, games_window)
             if player_avg_targets is None:
                 continue
 
@@ -752,7 +755,7 @@ def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, current_sea
                 continue
 
             coverage_splits = player_coverage_splits(pbp_df, player_id)
-            flag = screen_simplified_coverage_prop(player_name, market_key, opponent, player_avg_targets, zone_rate, coverage_splits, avg_line)
+            flag = screen_simplified_coverage_prop(resolved_name, market_key, opponent, player_avg_targets, zone_rate, coverage_splits, avg_line)
             if flag:
                 flag.update({
                     "price": avg_price, "season": season, "week": week,

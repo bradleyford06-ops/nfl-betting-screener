@@ -1,8 +1,77 @@
 import logging
+import re
 from screener.fetch_stats import build_position_stat_team_games
 from model.power_ratings import ratings_from_team_games
 
 logger = logging.getLogger(__name__)
+
+_SUFFIX_RE = re.compile(r"\s+(jr|sr|ii|iii|iv|v)\.?$", re.IGNORECASE)
+
+# Common nickname <-> given-name pairs seen on NFL rosters. The odds provider and nflverse
+# don't always agree on which form to use for the same player (e.g. odds side "Joshua
+# Palmer" vs. nflverse's "Josh Palmer") -- punctuation normalization alone can't catch that,
+# so first names are additionally compared through this equivalence table.
+NICKNAME_GROUPS = [
+    {"josh", "joshua"}, {"mike", "michael"}, {"matt", "matthew"}, {"chris", "christopher"},
+    {"alex", "alexander"}, {"zach", "zachary", "zack"}, {"sam", "samuel"}, {"dan", "daniel"},
+    {"tony", "anthony"}, {"rob", "robert", "bobby"}, {"will", "william", "billy"},
+    {"ben", "benjamin"}, {"tom", "thomas", "tommy"}, {"steve", "steven", "stephen"},
+    {"joe", "joseph", "joey"}, {"andy", "andrew"}, {"ken", "kenneth"}, {"jim", "james", "jimmy"},
+    {"pat", "patrick"}, {"nick", "nicholas"},
+]
+_NICKNAME_LOOKUP = {alias: group for group in NICKNAME_GROUPS for alias in group}
+
+
+def _normalize_name(name):
+    """Strip punctuation and generational suffixes so formatting differences between the
+    odds provider and nflverse (periods in initials, apostrophes, Jr./Sr./III) don't block
+    a real match."""
+    name = name.replace(".", "").replace("'", "").replace("-", " ")
+    name = _SUFFIX_RE.sub("", name)
+    return " ".join(name.lower().split())
+
+
+def _first_name_variants(first_name):
+    """A first name's own normalized form, plus any nickname-equivalent forms."""
+    return _NICKNAME_LOOKUP.get(first_name, {first_name})
+
+
+def resolve_player_display_name(weekly_df, player_name):
+    """
+    Match an odds-provider player name to nflverse's player_display_name for the same
+    person. The two sources don't always spell names the same way -- periods in initials
+    ("DJ Moore" vs. nflverse's "D.J. Moore") or a full given name vs. the common nickname
+    nflverse uses ("Joshua Palmer" vs. "Josh Palmer"). Left unresolved, a mismatch used to
+    silently route a real veteran into the "no data yet" rookie list instead of screening
+    them. Tries, in order: exact match, punctuation/suffix-normalized match, then a
+    nickname-aware first-name + last-name match. Returns the matching player_display_name,
+    or None if there's truly no match (a real rookie debut).
+    """
+    all_names = weekly_df["player_display_name"].unique()
+    if player_name in all_names:
+        return player_name
+
+    normalized_target = _normalize_name(player_name)
+    exact_normalized = [n for n in all_names if _normalize_name(n) == normalized_target]
+    if len(exact_normalized) == 1:
+        return exact_normalized[0]
+
+    target_parts = normalized_target.split()
+    if not target_parts:
+        return None
+    target_last = target_parts[-1]
+    target_first_variants = _first_name_variants(target_parts[0])
+
+    nickname_matches = [
+        n for n in all_names
+        if (parts := _normalize_name(n).split()) and parts[-1] == target_last
+        and parts[0] in target_first_variants
+    ]
+    if len(nickname_matches) == 1:
+        return nickname_matches[0]
+
+    return None
+
 
 # Maps an Odds API player-prop market key to the matching nfl_data_py stat column
 # and the position(s) that stat applies to (used to compute what defenses allow).
@@ -56,12 +125,6 @@ def player_current_team(weekly_df, player_name):
     if rows.empty:
         return None
     return rows.sort_values(["season", "week"]).iloc[-1]["recent_team"]
-
-
-def has_nfl_history(weekly_df, player_name):
-    """Whether a player has any NFL game logs at all — false for a true rookie debut,
-    who we can't compute a trend for and shouldn't silently drop without a trace."""
-    return not weekly_df[weekly_df["player_display_name"] == player_name].empty
 
 
 def position_stat_ratings(weekly_df, position, stat_column):

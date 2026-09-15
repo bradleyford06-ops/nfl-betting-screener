@@ -5,7 +5,7 @@ from screener.ledger import get_open_picks, mark_result
 from screener.fetch_stats import get_schedules, get_weekly_player_stats
 from screener.fetch_cfb_stats import get_cfb_schedules
 from screener.fetch_mlb_stats import get_mlb_schedule
-from model.player_trends import PROP_STAT_MAP
+from model.player_trends import PROP_STAT_MAP, resolve_player_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +82,15 @@ def grade_game_pick(pick, home_score, away_score):
 
 
 def _find_prop_actual(weekly_df, player_name, season, week, stat_column):
-    """Actual stat value for a player in a given week, or None if not played/not published yet."""
+    """Actual stat value for a player in a given week, or None if not played/not published yet.
+    Ledger picks made before the name-matching fix may still have the odds provider's own
+    spelling stored as `subject` rather than nflverse's, so resolve it the same way live
+    screening does rather than requiring an exact match here too."""
+    resolved_name = resolve_player_display_name(weekly_df, player_name)
+    if resolved_name is None:
+        return None
     match = weekly_df[
-        (weekly_df["player_display_name"] == player_name)
+        (weekly_df["player_display_name"] == resolved_name)
         & (weekly_df["season"] == season)
         & (weekly_df["week"] == week)
     ]
