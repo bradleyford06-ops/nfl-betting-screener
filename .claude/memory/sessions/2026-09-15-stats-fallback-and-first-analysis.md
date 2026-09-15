@@ -43,3 +43,46 @@ Goal: Bradley asked for a post-weekend review to confirm the automated runs and 
 
 ## Next Step
 Re-run both analyses in 3-4 weeks with more data — the NFL WR finding has enough evidence to trust already; CFB spread needs a bigger sample before concluding anything. Once there's real post-2026-09-15 predicted_value data, prefer it over `cfb_performance.py`'s text-parsing fallback. Also worth eventually checking: the "our margins run hot vs. market on lopsided games" CFB observation, if it keeps recurring.
+
+## End of Session
+
+Completed this session:
+- Confirmed the weekend's automated runs and dashboard were working correctly
+- Found and fixed a bug causing real players (like DJ Moore) to show up as fake "rookies" with no data
+- Discovered our free stats source had silently stopped updating player stats back in May 2025 — a much bigger problem than it first looked like
+- Rebuilt how we pull player stats (now sourced directly from play-by-play data) so it's current again and doesn't have the gaps an earlier attempt had
+- Fixed two more bugs found along the way: props that could never be graded when a player had a truly quiet game, and a technical storage bug that was silently corrupting how results were saved (repaired all 265 affected records)
+- Every pick, across all four sports, now saves the model's own predicted number — not just win/loss — so we can analyze results in real depth going forward
+- Ran the full pipeline live several times and confirmed each fix actually worked before moving on
+- Did a full analysis of Week 1 NFL player props — found a real, statistically meaningful weak spot in receiver props specifically
+- Did a full analysis of CFB spread picks — the early results that looked concerning turned out to be normal ups-and-downs, not a broken model, once checked against historical patterns
+- Built reusable analysis tools we can just re-run in a few weeks with more data, instead of starting from scratch each time
+- Published two written reports (First Read, Second Read) with the findings
+
+Still pending:
+- Re-run both analyses in 3-4 weeks once more games are in the books
+- Keep an eye on whether the CFB "predicted margin runs hotter than the market" pattern shows up again
+
+Files changed:
+- `model/player_trends.py` — added the name-matching fix (`resolve_player_display_name`) and a NaN-safety fix
+- `screener/pipeline.py` — wired the name fix into both prop screeners; added predicted-value tracking; same NaN-safety fix
+- `screener/reconcile.py` — wired the name fix into grading; fixed the corrupted-storage bug
+- `screener/fetch_stats.py` — rebuilt the player-stats fallback on play-by-play data, including the fix for true zero-stat games
+- `screener/ledger.py` — added the predicted_value/predicted_value_type columns
+- `data/ledger.db` — repaired 265 corrupted result records
+- `analysis/` — new folder with reusable analysis tools (`props_performance.py`, `cfb_performance.py`, `README.md`)
+- `CLAUDE.md` — pointer to the new analysis folder
+
+Decisions made:
+- Chose the play-by-play rebuild over the earlier Next Gen Stats version once live testing showed it was both more complete and gap-free
+- Didn't try to recover the model's predicted numbers for picks made before today — not possible to do reliably, and the tracking is in place going forward
+- Treated the CFB spread shortfall as normal variance, not a problem — explicitly did not change any live settings based on it
+- Built the analysis folder as real, reusable code (not just one-off chat answers), since Bradley wants to keep doing this over time
+
+Blockers or warnings:
+- None active — everything is running cleanly. The original free stats source is still down upstream as of today, but that no longer affects us since the play-by-play fallback covers it.
+
+Recommended first step next session:
+Re-run `analysis/props_performance.py` and `analysis/cfb_performance.py` once a few more weeks of picks have graded (roughly 3-4 weeks from today) to get a statistically meaningful read on both the WR props finding and the CFB spread question.
+
+Session duration: long session (multiple hours) — covered a full post-weekend review, three chained bug fixes, a new tracking feature, and two full performance analyses with published reports.
