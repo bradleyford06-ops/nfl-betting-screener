@@ -1,5 +1,6 @@
 import logging
 import re
+import pandas as pd
 from screener.fetch_stats import build_position_stat_team_games
 from model.power_ratings import ratings_from_team_games
 
@@ -208,7 +209,11 @@ def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, 
     ratings = get_position_stat_ratings(weekly_df, position, stat_column, ratings_cache)
 
     player_avg, sample_size = player_adjusted_average(weekly_df, player_name, stat_column, ratings, games_window)
-    if player_avg is None or sample_size < MIN_SAMPLE_SIZE:
+    # pd.isna, not `is None` -- a stat category a data source doesn't track for this player
+    # (e.g. RB receiving under the Next Gen Stats fallback in screener/fetch_stats.py) comes
+    # back NaN, not None, and NaN silently passes every numeric comparison below instead of
+    # stopping here.
+    if pd.isna(player_avg) or sample_size < MIN_SAMPLE_SIZE:
         return None
 
     opponent_row = ratings[ratings["team"] == opponent_team]

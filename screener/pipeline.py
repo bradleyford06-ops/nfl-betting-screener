@@ -744,7 +744,11 @@ def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, current_sea
 
             target_ratings = get_position_stat_ratings(weekly_df, position, "targets", target_ratings_cache)
             player_avg_targets, _ = player_adjusted_average(weekly_df, resolved_name, "targets", target_ratings, games_window)
-            if player_avg_targets is None:
+            # pd.isna, not `is None` -- a stat category a data source doesn't track for this
+            # player (e.g. RB receiving under the Next Gen Stats fallback) comes back NaN,
+            # not None, and NaN silently passes every numeric comparison downstream instead
+            # of stopping here.
+            if pd.isna(player_avg_targets):
                 continue
 
             opponent_row = def_tendencies[def_tendencies["team"] == opponent]
