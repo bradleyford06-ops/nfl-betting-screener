@@ -40,23 +40,35 @@ def get_connection():
             UNIQUE(strategy, season, week, subject, market)
         )
     """)
-    try:
-        conn.execute("ALTER TABLE picks ADD COLUMN small_sample INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass  # column already exists — SQLite has no "ADD COLUMN IF NOT EXISTS"
+    for column_def in (
+        "small_sample INTEGER DEFAULT 0",
+        "predicted_value REAL",
+        "predicted_value_type TEXT",
+    ):
+        try:
+            conn.execute(f"ALTER TABLE picks ADD COLUMN {column_def}")
+        except sqlite3.OperationalError:
+            pass  # column already exists — SQLite has no "ADD COLUMN IF NOT EXISTS"
     conn.commit()
     return conn
 
 
 def record_pick(strategy, season, week, subject, market, side, line, edge_score, price=None,
                  opponent=None, home_team=None, away_team=None, commence_time=None, explanation=None,
-                 small_sample=False):
+                 small_sample=False, predicted_value=None, predicted_value_type=None):
     """
     Log one flagged pick, or update it if we've already logged this exact market for this
     subject this week. Upserts on (strategy, season, week, subject, market) — a pick flagged
     again on a later run refreshes the side/line/price/edge to the latest signal (what
     Bradley would actually see if he checked today), but `first_flagged_at` is preserved so
     we know when we first spotted it.
+
+    predicted_value is the model's own raw number behind the pick -- a player's projected
+    stat, a predicted spread/total, or a predicted win/cover probability, depending on
+    market (see predicted_value_type, one of the model's own field names: predicted_spread,
+    predicted_total, model_win_prob, model_cover_prob, player_recent_avg, predicted_value).
+    Previously this only ever lived inside the free-text explanation, unusable for any
+    numeric analysis (e.g. how far off was the model, on average, across a season).
     """
     now = datetime.now(timezone.utc).isoformat()
     price = price or None  # American odds are never legitimately 0 — treat 0 as missing data, not a real price
@@ -64,8 +76,9 @@ def record_pick(strategy, season, week, subject, market, side, line, edge_score,
     conn.execute("""
         INSERT INTO picks (strategy, season, week, subject, market, side, line, price, edge_score,
                             opponent, home_team, away_team, commence_time, explanation, small_sample,
+                            predicted_value, predicted_value_type,
                             first_flagged_at, last_seen_at, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
         ON CONFLICT(strategy, season, week, subject, market) DO UPDATE SET
             side=excluded.side,
             line=excluded.line,
@@ -77,9 +90,12 @@ def record_pick(strategy, season, week, subject, market, side, line, edge_score,
             commence_time=excluded.commence_time,
             explanation=excluded.explanation,
             small_sample=excluded.small_sample,
+            predicted_value=excluded.predicted_value,
+            predicted_value_type=excluded.predicted_value_type,
             last_seen_at=excluded.last_seen_at
     """, (strategy, season, week, subject, market, side, line, price, edge_score,
-          opponent, home_team, away_team, commence_time, explanation, int(small_sample), now, now))
+          opponent, home_team, away_team, commence_time, explanation, int(small_sample),
+          predicted_value, predicted_value_type, now, now))
     conn.commit()
     conn.close()
 

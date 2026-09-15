@@ -854,10 +854,31 @@ def log_results_to_ledger(results):
     """
     from screener.ledger import record_pick
 
+    # The model's own raw predicted number lives under a different key per market type
+    # (see each model's screen_* function), but every flag has at most one of these --
+    # checked in this order finds whichever one applies. Previously this number only ever
+    # ended up embedded in a sentence of free-text explanation, unusable for any numeric
+    # analysis across strategies or sports (e.g. how far off was the model, on average).
+    PREDICTED_VALUE_KEYS = [
+        "predicted_spread", "predicted_total", "model_win_prob", "model_cover_prob",
+        "player_recent_avg", "predicted_value",
+    ]
+
+    def _predicted_value(flag):
+        for key in PREDICTED_VALUE_KEYS:
+            if flag.get(key) is not None:
+                # float(), not the raw value -- these can come out as numpy scalars
+                # (float32 in particular has no sqlite3 adapter and silently gets stored
+                # as a corrupted blob instead of a number; see the actual_value bug this
+                # same issue caused in screener/reconcile.py).
+                return float(flag[key]), key
+        return None, None
+
     def log_flag(flag, strategy, subject):
         if flag.get("season") is None or flag.get("week") is None:
             logger.debug(f"Skipping ledger entry for {subject} — no season/week resolved")
             return
+        predicted_value, predicted_value_type = _predicted_value(flag)
         record_pick(
             strategy=strategy,
             season=flag["season"],
@@ -874,6 +895,8 @@ def log_results_to_ledger(results):
             commence_time=flag.get("commence_time"),
             explanation=flag.get("explanation"),
             small_sample=flag.get("small_sample", False),
+            predicted_value=predicted_value,
+            predicted_value_type=predicted_value_type,
         )
 
     for flag in results.get("games", []):
