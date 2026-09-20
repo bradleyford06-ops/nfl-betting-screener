@@ -89,6 +89,7 @@ def compute_synthetic_bets(weekly_df, position, stat_column):
                 "defense_edge_pct": (defense_adjusted_allowed - league_avg) / league_avg,
                 "actual_value": row[stat_column],
                 "actual_beat_line": row[stat_column] > synthetic_line,
+                "usage_rank": row.get("usage_rank"),
             })
 
     return pd.DataFrame(results)

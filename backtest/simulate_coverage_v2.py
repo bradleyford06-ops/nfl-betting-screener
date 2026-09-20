@@ -118,6 +118,7 @@ def compute_synthetic_simplified_bets(weekly_df, pbp_df, position, stat_column):
                 "min_sample": min(splits["zone"]["targets"], splits["man"]["targets"]),
                 "actual_value": row[stat_column],
                 "actual_beat_line": row[stat_column] > synthetic_line,
+                "usage_rank": row.get("usage_rank"),
             })
 
     return pd.DataFrame(results)

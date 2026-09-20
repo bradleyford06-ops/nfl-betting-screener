@@ -20,13 +20,26 @@ PLAYER_COVERAGE_GAMES_WINDOW = 32  # ~2 seasons — coverage splits need a bigge
                                      # box-score trends, since each target gets split further
                                      # into a zone/man bucket and samples get thin fast
 
-# Calibrated (2026-08-16) against backtest/simulate_coverage_v2.py, run across all 6
-# receiving combos (WR/RB/TE x receiving_yards/receptions, 2022-2024). Every combo showed
-# the same clean, monotonically increasing hit rate as the edge threshold rose — real
-# signal, unlike the full model above. 0.20 sits in a consistently solid zone across all
-# six (55-60% hit rate, 700-1750 bets) without over-fitting six slightly different numbers
-# to a still-modest backtest sample — see the session log for the full per-combo sweep.
-COVERAGE_EDGE_THRESHOLD = 0.20  # predicted value must differ from the line by 20%+ to flag
+# Originally calibrated (2026-08-16) at 0.20 against backtest/simulate_coverage_v2.py, run
+# across all 6 receiving combos (WR/RB/TE x receiving_yards/receptions, 2022-2024) — every
+# combo showed a clean, monotonically increasing hit rate as the edge threshold rose.
+#
+# Raised to 0.35 (2026-09-19): Bradley's props volume was too high to realistically bet
+# every pick (~150 coverage picks/week in the 2019-2024 backtest). Restricting to only the
+# top-of-depth-chart player per team/position (RB1, WR1/2, TE1 — see model/usage_rank.py)
+# was tried first and rejected: it made hit rate WORSE on every one of the 6 combos, and
+# flipped RB receiving yards to a losing 49.8% (down from 52.9%) — the coverage model's
+# edge apparently depends partly on role players with a distinctive man/zone split, which a
+# depth-chart filter cuts out. A naive "keep only the biggest edges each week" cap was tried
+# next and also backfired (55.3% at all picks down to 51.4% at the top 10/week) — the
+# single largest predicted edges aren't the most reliable ones, likely small-sample coverage
+# splits producing extreme (not extra-trustworthy) predictions. What actually worked, re-
+# validated on the pooled 6-combo backtest: raising this uniform threshold, same lever
+# already proven for NFL/CFB totals. 0.35 cuts volume from ~150/week to ~71/week (-53%)
+# while hit rate holds at 56.3% (up slightly from 55.3% at 0.20) — a clean, real tradeoff,
+# not just fewer bets for the sake of fewer bets. See the trend model's separate
+# depth-chart-rank filter (model/usage_rank.py) for the props-volume fix that *did* work.
+COVERAGE_EDGE_THRESHOLD = 0.35  # predicted value must differ from the line by 35%+ to flag
 SMALL_SAMPLE_TARGET_THRESHOLD = 15  # below this many targets in a coverage bucket, flag it visibly
 
 COVERAGE_MARKET_MAP = {

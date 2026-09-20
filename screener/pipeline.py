@@ -31,6 +31,7 @@ from model.player_trends import (
     screen_player_prop, player_current_team, resolve_player_display_name,
     get_position_stat_ratings, player_adjusted_average,
 )
+from model.usage_rank import current_usage_rank_lookup
 from model.coverage_sim import (
     team_defensive_tendencies, player_coverage_splits, screen_simplified_coverage_prop, COVERAGE_MARKET_MAP,
 )
@@ -606,12 +607,17 @@ def run_props_screener(weekly_df, schedules_df, name_map, current_season, curren
     in backtesting and are marked "speculative" by screen_player_prop — kept live for
     visibility rather than filtered out, but routed to their own list here so they don't
     get mixed into the main ranked results at face value.
+
+    Also restricts RB/WR/TE props to top-of-depth-chart players (RB1, WR1/2, TE1) via
+    usage_rank_lookup — see model/usage_rank.py and CLAUDE.md's 2026-09-19 depth-chart
+    investigation for why (volume was too high to realistically bet every pick each week).
     """
     events = get_events()
     flags = []
     speculative_flags = []
     no_data = []
     ratings_cache = {}  # shared across all players in this run so shared position/stat combos aren't recomputed
+    usage_rank_lookup = current_usage_rank_lookup(weekly_df)
 
     for event in events:
         home_full, away_full = event["home_team"], event["away_team"]
@@ -664,7 +670,10 @@ def run_props_screener(weekly_df, schedules_df, name_map, current_season, curren
             else:
                 continue  # has history, but team doesn't match this game — skip rather than guess
 
-            flag = screen_player_prop(weekly_df, resolved_name, market_key, opponent, avg_line, games_window, ratings_cache)
+            flag = screen_player_prop(
+                weekly_df, resolved_name, market_key, opponent, avg_line, games_window,
+                ratings_cache, usage_rank_lookup,
+            )
             if flag:
                 flag.update({
                     "price": avg_price, "season": season, "week": week,

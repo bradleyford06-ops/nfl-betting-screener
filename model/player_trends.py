@@ -3,6 +3,7 @@ import re
 import pandas as pd
 from screener.fetch_stats import build_position_stat_team_games
 from model.power_ratings import ratings_from_team_games
+from model.usage_rank import within_depth_chart_limit
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,8 @@ def required_edge_pct(sample_size, base_threshold):
     return base_threshold * (FULL_CONFIDENCE_GAMES / effective_games) ** 0.5
 
 
-def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, games_window=8, ratings_cache=None):
+def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, games_window=8,
+                        ratings_cache=None, usage_rank_lookup=None):
     """
     Compare one player prop line against the player's opponent-adjusted recent trend and
     how the opposing defense has performed against that stat/position, also opponent-adjusted.
@@ -194,6 +196,12 @@ def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, 
     Returns a dict describing the edge if both signals agree it's a value bet, else None.
     Assumes the caller has already confirmed the player has some NFL history — a true
     rookie debut (zero games) should be routed to the "no data yet" list instead of here.
+
+    usage_rank_lookup (2026-09-19): optional {player_display_name: usage_rank} dict from
+    model.usage_rank.current_usage_rank_lookup. When given, restricts RB/WR/TE props to
+    only top-of-depth-chart players (RB1, WR1/2, TE1 — approximated via trailing usage
+    share, since no reliable real depth-chart source exists). Backtested to cut trend-model
+    volume roughly in half with hit rate holding steady or improving — see CLAUDE.md.
     """
     if market_key not in PROP_STAT_MAP:
         return None
@@ -205,6 +213,9 @@ def screen_player_prop(weekly_df, player_name, market_key, opponent_team, line, 
     if player_rows.empty:
         return None
     position = player_rows["position"].iloc[-1] or positions[0]
+
+    if usage_rank_lookup is not None and not within_depth_chart_limit(position, usage_rank_lookup.get(player_name)):
+        return None
 
     ratings = get_position_stat_ratings(weekly_df, position, stat_column, ratings_cache)
 
