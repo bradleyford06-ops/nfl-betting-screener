@@ -7,7 +7,13 @@ NHL_TEAM_NAME_TO_ABBR = {
     "Calgary Flames": "CGY", "Carolina Hurricanes": "CAR", "Chicago Blackhawks": "CHI",
     "Colorado Avalanche": "COL", "Columbus Blue Jackets": "CBJ", "Dallas Stars": "DAL",
     "Detroit Red Wings": "DET", "Edmonton Oilers": "EDM", "Florida Panthers": "FLA",
-    "Los Angeles Kings": "LAK", "Minnesota Wild": "MIN", "Montreal Canadiens": "MTL",
+    "Los Angeles Kings": "LAK", "Minnesota Wild": "MIN",
+    # The Odds API actually returns "Montréal" with the accent (confirmed live 2026-09-30)
+    # -- the unaccented spelling below was never real, so every Montreal game had been
+    # silently skipped (to_nhl_abbr's fallback returns the raw name, which then fails every
+    # downstream lookup keyed on the 3-letter abbreviation). Both kept, same reasoning as
+    # the St Louis Blues entries below.
+    "Montreal Canadiens": "MTL", "Montréal Canadiens": "MTL",
     "Nashville Predators": "NSH", "New Jersey Devils": "NJD", "New York Islanders": "NYI",
     "New York Rangers": "NYR", "Ottawa Senators": "OTT", "Philadelphia Flyers": "PHI",
     "Pittsburgh Penguins": "PIT", "Seattle Kraken": "SEA", "San Jose Sharks": "SJS",
