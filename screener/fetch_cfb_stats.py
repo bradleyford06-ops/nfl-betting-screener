@@ -213,12 +213,32 @@ def get_cfb_team_name_map(year):
     for t in teams:
         if not t.mascot:
             continue
-        mapping[_normalize_team_name(f"{t.school} {t.mascot}")] = t.school
-        for alt in (t.alternate_names or []):
-            mapping[_normalize_team_name(f"{alt} {t.mascot}")] = t.school
+        normalized_mascot = _normalize_team_name(t.mascot)
+        for school_name in [t.school] + list(t.alternate_names or []):
+            for school_variant in _state_name_variants(_normalize_team_name(school_name)):
+                # setdefault, not [] = -- a real name/alternate_name from cfbd should never
+                # be overridden by a synthetic "add/remove State" guess for a *different*
+                # school that happens to produce the same key.
+                mapping.setdefault(f"{school_variant} {normalized_mascot}", t.school)
 
     save_cache(cache_key, mapping)
     return mapping
+
+
+def _state_name_variants(normalized_school_name):
+    """
+    A school's normalized name, plus the same name with "state" added or removed --
+    schools occasionally rebrand between "X State" and "X" (e.g. McNeese State University
+    shortened to just McNeese in 2024), and cfbd's own team list can update faster than
+    The Odds API's naming, or vice versa (found live 2026-09-30: cfbd already says
+    "McNeese", but the odds provider still says "McNeese State"). Generating both forms
+    up front handles either direction without hand-maintaining an override per renamed
+    school, the same reasoning _normalize_team_name already uses for accents/punctuation.
+    """
+    words = normalized_school_name.split()
+    if "state" in words:
+        return {normalized_school_name, " ".join(w for w in words if w != "state")}
+    return {normalized_school_name, normalized_school_name + " state"}
 
 
 def to_cfb_school_name(full_team_name, name_map):
