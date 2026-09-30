@@ -103,6 +103,28 @@
     font-weight: 600;
   }
 
+  .pagination {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+  .pagination button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .pagination button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
   .game-card {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -279,10 +301,11 @@
     </div>
     <div class="table-scroll">
       <table id="recent-picks-table">
-        <thead><tr><th>Sport</th><th>Week / Date</th><th>Subject</th><th>Market</th><th>Side</th><th>Line</th><th>Result</th></tr></thead>
+        <thead><tr><th>Sport</th><th>Week / Date</th><th>Subject</th><th>Market</th><th>Side</th><th>Line</th><th>Odds</th><th>Result</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
+    <div class="pagination" id="recent-pagination"></div>
   </div>
 </main>
 
@@ -736,6 +759,9 @@ function strategyLabel(strategy) {
   return STRATEGY_LABELS[strategy] || strategy;
 }
 
+let recentPage = 1;
+const RECENT_PAGE_SIZE = 50;
+
 function renderSeasonPerformance() {
   const cardsContainer = document.getElementById("perf-cards");
   cardsContainer.innerHTML = "";
@@ -787,6 +813,16 @@ function renderSeasonPerformance() {
     return "NFL";
   }
 
+  // Prices flagged price_reliable=0 come from a real averaging bug (found 2026-09-30,
+  // see CLAUDE.md's "Price-averaging bug" note) that can't be recomputed after the fact --
+  // the individual bookmaker quotes were never saved, only the bad average. Showing a
+  // fabricated number (e.g. a real historical "-20") would be worse than showing nothing.
+  function formatOdds(p) {
+    if (!p.price_reliable || p.price == null) return "—";
+    const rounded = Math.round(p.price);
+    return rounded > 0 ? `+${rounded}` : `${rounded}`;
+  }
+
   const sportFilter = document.getElementById("filter-recent-sport").value;
   const tbody = document.querySelector("#recent-picks-table tbody");
   tbody.innerHTML = "";
@@ -794,10 +830,17 @@ function renderSeasonPerformance() {
     .filter(p => !sportFilter || sportOf(p.strategy) === sportFilter)
     .sort((a, b) => new Date(b.commence_time) - new Date(a.commence_time));
 
-  if (filteredPicks.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No results for this sport yet.</td></tr>';
+  const totalPicks = filteredPicks.length;
+  const totalPages = Math.max(1, Math.ceil(totalPicks / RECENT_PAGE_SIZE));
+  if (recentPage > totalPages) recentPage = totalPages;
+  if (recentPage < 1) recentPage = 1;
+  const startIdx = (recentPage - 1) * RECENT_PAGE_SIZE;
+  const pageItems = filteredPicks.slice(startIdx, startIdx + RECENT_PAGE_SIZE);
+
+  if (pageItems.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No results for this sport yet.</td></tr>';
   }
-  filteredPicks.forEach(p => {
+  pageItems.forEach(p => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${sportOf(p.strategy)}</td>
@@ -806,9 +849,23 @@ function renderSeasonPerformance() {
       <td>${p.market}</td>
       <td>${p.side}</td>
       <td>${p.line != null ? p.line : "-"}</td>
+      <td>${formatOdds(p)}</td>
       <td class="status-${p.status}">${p.status}</td>`;
     tbody.appendChild(tr);
   });
+
+  const pagination = document.getElementById("recent-pagination");
+  if (totalPicks === 0) {
+    pagination.innerHTML = "";
+  } else {
+    const rangeEnd = Math.min(startIdx + RECENT_PAGE_SIZE, totalPicks);
+    pagination.innerHTML = `
+      <button id="recent-prev" ${recentPage <= 1 ? "disabled" : ""}>&larr; Prev</button>
+      <span>Showing ${startIdx + 1}-${rangeEnd} of ${totalPicks}</span>
+      <button id="recent-next" ${recentPage >= totalPages ? "disabled" : ""}>Next &rarr;</button>`;
+    document.getElementById("recent-prev").addEventListener("click", () => { recentPage--; renderSeasonPerformance(); });
+    document.getElementById("recent-next").addEventListener("click", () => { recentPage++; renderSeasonPerformance(); });
+  }
 }
 
 // ---------- Init ----------
@@ -821,7 +878,7 @@ renderNhlWeekPills();
 renderNhlGames();
 renderMlbWeekPills();
 renderMlbGames();
-document.getElementById("filter-recent-sport").addEventListener("change", renderSeasonPerformance);
+document.getElementById("filter-recent-sport").addEventListener("change", () => { recentPage = 1; renderSeasonPerformance(); });
 renderSeasonPerformance();
 </script>
 

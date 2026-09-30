@@ -229,21 +229,22 @@ def build_mlb_week_data(open_picks):
     return _build_speculative_week_data(open_picks, "mlb_")
 
 
-def _recent_decided_picks(all_picks, limit=100):
-    """The most recently reconciled picks across every sport, for the dashboard's Recent
-    Results table. Sorted by reconciled_at (a real timestamp, set the moment mark_result
-    grades a pick) rather than get_all_picks()'s own (season, week, id) ordering -- that
-    ordering silently broke this once MLB joined the ledger, since MLB/NHL encode "week"
-    as a full calendar date (e.g. 20260906) while NFL/CFB use a real week number (e.g. 1)
-    -- any MLB/NHL week value is numerically thousands of times larger than any NFL/CFB
-    one, so a plain sort put every MLB/NHL pick after every NFL/CFB pick regardless of
-    actual date, and taking the tail via [-100:] meant NFL/CFB picks could never appear
-    at all once MLB started reconciling. Found 2026-09-07 when Bradley noticed CFB's own
-    season performance numbers were updating but no CFB picks ever showed in the list.
+def _recent_decided_picks(all_picks):
+    """Every reconciled pick across every sport, for the dashboard's Recent Results table
+    (paginated client-side, not truncated here -- Bradley explicitly wants to dig back
+    through full history, not just a recent slice; see the 2026-09-30 "recent results"
+    request). Sorted by reconciled_at (a real timestamp, set the moment mark_result grades
+    a pick) rather than get_all_picks()'s own (season, week, id) ordering -- that ordering
+    silently broke this once MLB joined the ledger, since MLB/NHL encode "week" as a full
+    calendar date (e.g. 20260906) while NFL/CFB use a real week number (e.g. 1) -- any
+    MLB/NHL week value is numerically thousands of times larger than any NFL/CFB one, so a
+    plain sort put every MLB/NHL pick after every NFL/CFB pick regardless of actual date.
+    Found 2026-09-07 when Bradley noticed CFB's own season performance numbers were
+    updating but no CFB picks ever showed in the (then 100-row-capped) list.
     """
     decided = [p for p in all_picks if p["status"] != "open"]
     decided.sort(key=lambda p: p.get("reconciled_at") or "", reverse=True)
-    return decided[:limit]
+    return decided
 
 
 def build_dashboard_data(open_picks, season_summary, all_picks, no_data=None):
