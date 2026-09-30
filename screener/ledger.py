@@ -44,6 +44,14 @@ def get_connection():
         "small_sample INTEGER DEFAULT 0",
         "predicted_value REAL",
         "predicted_value_type TEXT",
+        # 2026-09-30: whether `price` can be trusted for ROI math. A real bug (see CLAUDE.md's
+        # "Price-averaging bug" note) averaged multiple bookmakers' American odds with plain
+        # arithmetic instead of in implied-probability space -- mathematically invalid (real
+        # odds are never between -100 and +100) and it silently inflated or deflated ROI on
+        # whichever picks happened to win with a corrupted near-zero price. Defaults to 1
+        # (trust it) since new picks use the fixed averaging; a one-time backfill sets this to
+        # 0 for every already-recorded pick whose price was in that impossible range.
+        "price_reliable INTEGER DEFAULT 1",
     ):
         try:
             conn.execute(f"ALTER TABLE picks ADD COLUMN {column_def}")
@@ -92,7 +100,8 @@ def record_pick(strategy, season, week, subject, market, side, line, edge_score,
             small_sample=excluded.small_sample,
             predicted_value=excluded.predicted_value,
             predicted_value_type=excluded.predicted_value_type,
-            last_seen_at=excluded.last_seen_at
+            last_seen_at=excluded.last_seen_at,
+            price_reliable=1
     """, (strategy, season, week, subject, market, side, line, price, edge_score,
           opponent, home_team, away_team, commence_time, explanation, int(small_sample),
           predicted_value, predicted_value_type, now, now))

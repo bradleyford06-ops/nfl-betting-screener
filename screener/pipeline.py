@@ -55,15 +55,25 @@ NHL_LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 def average_price(prices):
     """
-    Average a team's moneyline price across every bookmaker offering it, in implied-
-    probability space rather than raw American-odds space. American odds can't be
-    linearly averaged once books disagree on which side is favored in a near-even game
-    (e.g. one book has a team at -105, another at +100, for the same matchup) -- plain-
-    averaging the raw numbers in that case produces a meaningless blended price that
-    doesn't correspond to any real probability, and silently corrupts any win-probability
-    edge calculated from it. Found in production 2026-08-30 while testing the new NFL Elo
-    moneyline model: a near-even Packers-Vikings game had books split on the favorite, and
-    the old plain average manufactured a fake ~27-point edge that wasn't really there.
+    Average a price across every bookmaker offering it, in implied-probability space
+    rather than raw American-odds space. American odds can't be linearly averaged once
+    books disagree enough on a side's likelihood (e.g. one book has a team at -105,
+    another at +100, for the same matchup) -- plain-averaging the raw numbers in that
+    case produces a meaningless blended price that doesn't correspond to any real
+    probability (real American odds are always <= -100 or >= +100; a naive average can
+    land anywhere in between, which is a dead giveaway something's wrong), and silently
+    corrupts any edge or profit calculation built from it. Found in production
+    2026-08-30 while testing the new NFL Elo moneyline model: a near-even Packers-Vikings
+    game had books split on the favorite, and the old plain average manufactured a fake
+    ~27-point edge that wasn't really there.
+
+    Originally only used for moneyline prices. Extended 2026-09-30 (Bradley noticed
+    nonsensical "(-2)", "(36)"-style prices on the props dashboard, plus props/spread/
+    total ROI that didn't square with the win record) to every price average in this
+    file -- spreads, totals, and player props all had the exact same plain-average bug,
+    just less consistently visible than moneyline's sign-flip case. See CLAUDE.md's
+    "Price-averaging bug" note for the full audit and how the ~470 already-corrupted
+    historical picks were handled.
     """
     if not prices:
         return None
@@ -207,13 +217,13 @@ def run_cfb_game_screener(cfb_schedules_df, cfb_name_map, current_season, curren
         if spread_lines:
             flag = screen_cfb_spread(prediction, sum(spread_lines) / len(spread_lines))
             if flag:
-                flag["price"] = sum(spread_prices) / len(spread_prices)
+                flag["price"] = average_price(spread_prices)
                 flags.append({**flag, **game_context})
 
         if CFB_TOTALS_ENABLED and total_lines:
             flag = screen_cfb_total(prediction, sum(total_lines) / len(total_lines))
             if flag:
-                flag["price"] = sum(total_prices) / len(total_prices)
+                flag["price"] = average_price(total_prices)
                 # Under is a real, validated edge; Over stays speculative — see
                 # model/cfb_power_ratings.py's screen_cfb_total for the backtest evidence.
                 (speculative_flags if flag["speculative"] else flags).append({**flag, **game_context})
@@ -364,7 +374,7 @@ def run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs, games_window=25):
         if total_lines:
             flag = screen_nhl_total(prediction, sum(total_lines) / len(total_lines))
             if flag:
-                flag["price"] = sum(total_prices) / len(total_prices)
+                flag["price"] = average_price(total_prices)
                 flag["explanation"] += goalie_caveat
                 flags.append({**flag, **game_context})
 
@@ -505,7 +515,7 @@ def run_mlb_game_screener(mlb_schedule_df, games_window=30, pitcher_games_window
         if total_lines:
             flag = screen_mlb_total(prediction, sum(total_lines) / len(total_lines))
             if flag:
-                flag["price"] = sum(total_prices) / len(total_prices)
+                flag["price"] = average_price(total_prices)
                 flag["explanation"] += pitcher_caveat
                 speculative_flags.append({**flag, **game_context})
 
@@ -589,14 +599,14 @@ def run_game_screener(schedules_df, name_map, current_season, current_week, mark
         if spread_lines:
             flag = screen_spread(prediction, sum(spread_lines) / len(spread_lines))
             if flag:
-                flag["price"] = sum(spread_prices) / len(spread_prices)
+                flag["price"] = average_price(spread_prices)
                 flags.append({**flag, **game_context})
 
         if total_lines:
             flag = screen_total(prediction, sum(total_lines) / len(total_lines))
             market_spread_home = sum(spread_lines) / len(spread_lines) if spread_lines else None
             if flag and total_conviction_ok(prediction, market_spread_home):
-                flag["price"] = sum(total_prices) / len(total_prices)
+                flag["price"] = average_price(total_prices)
                 flags.append({**flag, **game_context})
 
         home_ml = average_price(home_ml_quotes)
@@ -665,7 +675,7 @@ def run_props_screener(weekly_df, schedules_df, name_map, current_season, curren
         for (market_key, player_name), lines in lines_by_player_market.items():
             avg_line = sum(lines) / len(lines)
             prices = prices_by_player_market[(market_key, player_name)]
-            avg_price = sum(prices) / len(prices)
+            avg_price = average_price(prices)
 
             resolved_name = resolve_player_display_name(weekly_df, player_name)
             if resolved_name is None:
@@ -748,7 +758,7 @@ def run_coverage_screener(weekly_df, pbp_df, schedules_df, name_map, current_sea
 
         for (market_key, player_name), lines in lines_by_player_market.items():
             avg_line = sum(lines) / len(lines)
-            avg_price = sum(prices_by_player_market[(market_key, player_name)]) / len(prices_by_player_market[(market_key, player_name)])
+            avg_price = average_price(prices_by_player_market[(market_key, player_name)])
 
             resolved_name = resolve_player_display_name(weekly_df, player_name)
             if resolved_name is None:

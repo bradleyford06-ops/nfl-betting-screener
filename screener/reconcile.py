@@ -280,13 +280,25 @@ def summarize_season(season=None):
     def summarize(subset):
         wins = (subset["status"] == "won").sum()
         total = len(subset)
+
+        # ROI/profit is computed only over picks whose price we trust (see CLAUDE.md's
+        # "Price-averaging bug" note, 2026-09-30) -- a real bug averaged bookmaker prices
+        # with plain arithmetic instead of in implied-probability space, occasionally
+        # producing a mathematically-impossible near-zero price that paid out a wildly
+        # inflated "profit" on a win. Those already-recorded picks can't be repriced (the
+        # individual bookmaker quotes were never saved, only the bad average), so rather
+        # than either trust a fabricated number or silently zero it out, they're excluded
+        # from profit/ROI math entirely -- but NOT from win/loss/win_rate, which never
+        # depended on price and were never wrong.
+        priced = subset[subset["price_reliable"] == 1]
         result = {
             "bets": total,
             "wins": int(wins),
             "losses": int(total - wins),
             "win_rate": round(wins / total, 3) if total else None,
-            "total_profit_units": round(subset["profit_units"].sum(), 2),
-            "roi_pct": round(subset["profit_units"].sum() / total * 100, 1) if total else None,
+            "total_profit_units": round(priced["profit_units"].sum(), 2),
+            "roi_pct": round(priced["profit_units"].sum() / len(priced) * 100, 1) if len(priced) else None,
+            "priced_bets": len(priced),
         }
         return result
 
