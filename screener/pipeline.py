@@ -2,6 +2,7 @@ import logging
 import pandas as pd
 from collections import Counter
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from screener.fetch_stats import get_weekly_player_stats, get_schedules
 from screener.fetch_pbp import get_play_by_play
@@ -43,6 +44,13 @@ logger = logging.getLogger(__name__)
 # proven edge, and gets worse (not better) at bigger disagreements — and is kept in its own
 # section per Bradley's explicit choice to keep watching it, not because it's tradeable.
 CFB_TOTALS_ENABLED = True
+
+# NHL's "week" (really a calendar date, see run_nhl_game_screener) is bucketed in Bradley's
+# own timezone rather than UTC — matches screener/nhl_schedule_gate.py's PACIFIC_TZ and the
+# dashboard's own display timezone (dashboard/template.html). NHL games are almost always
+# evening starts, so a UTC date would push most games into "tomorrow" before they've even
+# started locally.
+NHL_LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 
 def average_price(prices):
@@ -249,6 +257,12 @@ def run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs, games_window=25):
     week — the ledger's "week" column is repurposed here to hold the game's calendar
     date as an integer (YYYYMMDD), which keeps the ledger's (season, week, subject,
     market) uniqueness meaningful for a day-based sport instead of a week-based one.
+    That date is computed in Pacific time (Bradley's own timezone — see
+    screener/nhl_schedule_gate.py and the dashboard's own display timezone), not UTC:
+    NHL games are almost always evening starts, so a straight UTC date would push most
+    games into "tomorrow" before they've even started locally — found 2026-09-30 when
+    a 7:10pm Pacific Sept 29 Canucks @ Oilers game (02:10 UTC Sept 30) showed under the
+    wrong day on the dashboard, even though the displayed game time itself was correct.
 
     Each goalie is resolved via the saves-prop confirmation signal where available
     (screener/nhl_goalies.py) and falls back to that team's own most-used goalie
@@ -272,9 +286,10 @@ def run_nhl_game_screener(nhl_schedule_df, nhl_goalie_logs, games_window=25):
         commence_time = game.get("commence_time")
         if not commence_time:
             continue
-        game_date = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
-        season = game_date.year if game_date.month >= 8 else game_date.year - 1
-        date_key = int(game_date.strftime("%Y%m%d"))
+        game_date_utc = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+        game_date_local = game_date_utc.astimezone(NHL_LOCAL_TZ)
+        season = game_date_local.year if game_date_local.month >= 8 else game_date_local.year - 1
+        date_key = int(game_date_local.strftime("%Y%m%d"))
 
         event_id = event_id_by_teams.get((home_full, away_full))
         if event_id is not None:
