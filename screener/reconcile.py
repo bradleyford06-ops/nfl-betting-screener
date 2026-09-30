@@ -5,11 +5,12 @@ from screener.ledger import get_open_picks, mark_result
 from screener.fetch_stats import get_schedules, get_weekly_player_stats
 from screener.fetch_cfb_stats import get_cfb_schedules
 from screener.fetch_mlb_stats import get_mlb_schedule
+from screener.fetch_nhl_stats import get_nhl_schedule
 from model.player_trends import PROP_STAT_MAP, resolve_player_display_name
 
 logger = logging.getLogger(__name__)
 
-GAME_MARKETS = {"spread", "total", "moneyline", "runline"}
+GAME_MARKETS = {"spread", "total", "moneyline", "runline", "puckline"}
 
 
 def american_odds_profit(odds, stake=1.0):
@@ -64,6 +65,18 @@ def grade_game_pick(pick, home_score, away_score):
             return "push"  # essentially never happens in a completed MLB game, handled defensively anyway
         winner = pick["home_team"] if home_score > away_score else pick["away_team"]
         return "won" if pick["side"] == winner else "lost"
+
+    if pick["market"] == "puckline":
+        # Either team, home or away, can be the puck-line favorite (screen_nhl_puckline
+        # picks whichever side actually has the edge), so which side needs to clear the
+        # line is read from the sign embedded in pick["side"] itself (e.g. "EDM -1.5" or
+        # "VAN +1.5"), not assumed from home/away -- same reasoning as the runline branch
+        # below, and the identical fix already applied to backtest/simulate_nhl.py's own
+        # grade_flag (see CLAUDE.md's 2026-09-06 sports-wide grading audit).
+        home_margin = home_score - away_score
+        picked_margin = home_margin if pick["side"].startswith(pick["home_team"]) else -home_margin
+        threshold = -pick["line"] if f"+{pick['line']}" in pick["side"] else pick["line"]
+        return "won" if picked_margin > threshold else "lost"
 
     if pick["market"] == "runline":
         # screen_mlb_runline only ever flags the market's -1.5 favorite going forward
@@ -168,8 +181,34 @@ def reconcile_all():
         mlb_schedules_df = None
         mlb_error = str(e)
 
-    if schedules_df is None and cfb_schedules_df is None and mlb_schedules_df is None:
-        return {"reconciled": 0, "still_open": len(open_picks), "cfb_error": cfb_error, "mlb_error": mlb_error}
+    nhl_error = None
+    try:
+        nhl_schedules_df = get_nhl_schedule(seasons_needed)
+        # NHL picks use the game's calendar date (YYYYMMDD, in Pacific time -- see
+        # NHL_LOCAL_TZ in screener/pipeline.py) as "week" instead of a real week number,
+        # same reasoning as MLB above -- add the same encoding so _find_game_result's
+        # generic season/week/team match works. The NHL API's own game_date already lines
+        # up with that Pacific-local date (confirmed live 2026-09-30 against a real
+        # completed game), so no timezone conversion is needed here, just the same
+        # string -> int reshape MLB already does.
+        nhl_schedules_df = nhl_schedules_df.assign(
+            week=nhl_schedules_df["game_date"].str.replace("-", "", regex=False).astype(int)
+        )
+    except RuntimeError:
+        logger.info("No NHL schedule data available yet — skipping NHL game reconciliation.")
+        nhl_schedules_df = None
+    except Exception as e:
+        # Same reasoning as the CFB/MLB blocks above -- a real failure (not just "not
+        # published yet") needs to be visible, not just logged and skipped.
+        logger.error(f"NHL schedule fetch failed, skipping NHL game reconciliation: {e}")
+        nhl_schedules_df = None
+        nhl_error = str(e)
+
+    if schedules_df is None and cfb_schedules_df is None and mlb_schedules_df is None and nhl_schedules_df is None:
+        return {
+            "reconciled": 0, "still_open": len(open_picks),
+            "cfb_error": cfb_error, "mlb_error": mlb_error, "nhl_error": nhl_error,
+        }
 
     try:
         weekly_df = get_weekly_player_stats(seasons_needed)
@@ -190,7 +229,7 @@ def reconcile_all():
             elif pick["strategy"].startswith("mlb_"):
                 active_schedule = mlb_schedules_df
             elif pick["strategy"].startswith("nhl_"):
-                active_schedule = None  # NHL reconciliation isn't built yet
+                active_schedule = nhl_schedules_df
             else:
                 active_schedule = schedules_df
             if active_schedule is None:
@@ -217,7 +256,10 @@ def reconcile_all():
         mark_result(pick["id"], outcome, actual_value)
         reconciled += 1
 
-    return {"reconciled": reconciled, "still_open": len(open_picks) - reconciled, "cfb_error": cfb_error, "mlb_error": mlb_error}
+    return {
+        "reconciled": reconciled, "still_open": len(open_picks) - reconciled,
+        "cfb_error": cfb_error, "mlb_error": mlb_error, "nhl_error": nhl_error,
+    }
 
 
 def summarize_season(season=None):
