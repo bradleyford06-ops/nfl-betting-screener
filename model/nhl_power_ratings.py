@@ -40,6 +40,17 @@ PUCK_LINE = 1.5  # the NHL puck line is essentially always fixed at +/-1.5 goals
 #     structural pattern, not real model skill. Kept live at Bradley's explicit choice
 #     (2026-08-22), same precedent as NFL/CFB totals, but labeled speculative/unproven
 #     in the report — do not treat its win rate/ROI as evidence of a real edge.
+#     Puck line investigation (2026-09-30): Bradley asked to try raising this threshold
+#     to see if it surfaces real edge. A favorite-vs-underdog breakdown at every
+#     threshold from 0.00 to 0.40 (backtest/run_nhl_puckline_sweep.py) showed the
+#     favorite side never clears a coin flip (41-50% win rate, no trend) at any level —
+#     raising the threshold only shrank its already-thin volume share further while the
+#     headline number climbed for an unrelated reason (the mix shifting toward underdog
+#     picks, which cover most of the time regardless of skill). Concluded raising the
+#     threshold doesn't find real edge, it just hides the same structural pattern better.
+#     Per Bradley's choice, screen_nhl_puckline now never flags the favorite side at all
+#     (see its docstring) rather than implying a predictive claim the model can't back up.
+#     Threshold left at 0.20 — same reasoning as before, still unproven/speculative.
 MONEYLINE_EDGE_THRESHOLD = 0.05
 PUCKLINE_EDGE_THRESHOLD = 0.20
 TOTAL_EDGE_THRESHOLD = 1.0
@@ -188,6 +199,19 @@ def screen_nhl_puckline(prediction, home_price, home_point, away_price, away_poi
     changes — only the odds do — so this is graded like a moneyline (compare
     probabilities) rather than like the NFL's screen_spread (compare predicted margins
     to a market number).
+
+    Underdog (+1.5) side ONLY — never flags the favorite (-1.5) side (2026-09-30). A
+    threshold-sweep investigation (see CLAUDE.md's "Puck line investigation" note, and
+    backtest/run_nhl_puckline_sweep.py) found the favorite side never clears a coin flip
+    at ANY edge threshold tested (41-50% win rate, no improving trend as the bar rises) --
+    the model has no real predictive skill there. Raising the threshold didn't fix this;
+    it just shrank the favorite side's already-tiny volume share further while the
+    headline win rate climbed for an unrelated reason (the mix shifting even more toward
+    underdog picks, which cover most of the time regardless of model skill since most NHL
+    games are decided by one goal). Flagging favorite-side picks implied a predictive
+    claim the model couldn't back up, so this now only ever surfaces the side it can
+    honestly rank by edge size, even though that side's edge is still unproven overall
+    (see PUCKLINE_EDGE_THRESHOLD's docstring) -- kept speculative either way.
     """
     home_is_favorite = home_point < 0
     favorite_team = prediction["home_team"] if home_is_favorite else prediction["away_team"]
@@ -203,13 +227,12 @@ def screen_nhl_puckline(prediction, home_price, home_point, away_price, away_poi
     favorite_fair, underdog_fair = devig_two_way(favorite_implied, underdog_implied)
 
     favorite_edge = favorite_cover_prob - favorite_fair
+    if favorite_edge >= 0:
+        return None  # would be a favorite-side pick -- never flag those, see docstring
     if abs(favorite_edge) < edge_threshold:
         return None
 
-    if favorite_edge > 0:
-        side, odds, model_prob, market_prob, edge = f"{favorite_team} -{PUCK_LINE}", favorite_price, favorite_cover_prob, favorite_fair, favorite_edge
-    else:
-        side, odds, model_prob, market_prob, edge = f"{underdog_team} +{PUCK_LINE}", underdog_price, 1 - favorite_cover_prob, underdog_fair, -favorite_edge
+    side, odds, model_prob, market_prob, edge = f"{underdog_team} +{PUCK_LINE}", underdog_price, 1 - favorite_cover_prob, underdog_fair, -favorite_edge
 
     return {
         "market": "puckline",
