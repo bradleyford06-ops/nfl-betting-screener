@@ -1,0 +1,38 @@
+name: Check NHL Daily Run Completed
+
+# Watchdog for the NHL screener missing its daily catch-window -- found 2026-10-03 after
+# a real 4-day outage where GitHub's cron landed every 3-7 hours instead of the intended
+# 30 minutes, so a too-narrow window was missed every single day with zero notification
+# (every check still reported "success" -- see screener/nhl_schedule_gate.py for the
+# actual fix, a much wider window). Runs once daily, safely after Pacific midnight, and
+# checks whether YESTERDAY's Pacific date (not today's, since Pacific has already rolled
+# over to a new day by the time this fires) had a real NHL game the screener never
+# actually screened.
+on:
+  schedule:
+    - cron: '17 10 * * *'  # 10:17 UTC -- comfortably after Pacific midnight year-round (PDT: 3:17am, PST: 2:17am)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-nhl-daily-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          echo "GMAIL_ADDRESS=${{ secrets.GMAIL_ADDRESS }}" >> .env
+          echo "GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}" >> .env
+
+      - name: Check whether yesterday's NHL game (if any) was actually screened
+        run: python -m scheduler.check_nhl_daily_run

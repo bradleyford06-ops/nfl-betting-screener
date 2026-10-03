@@ -101,6 +101,43 @@ What to do:
     _send(subject, body)
 
 
+def send_nhl_no_run_alert(missed_date, first_game_time):
+    """
+    Email an alert when the NHL screener had a real game to screen on `missed_date` but
+    never actually ran — the backstop for a silent multi-day gap like the one found
+    2026-10-03: GitHub's cron for nhl_screener.yml landed every 3-7 hours instead of the
+    intended 30 minutes, and combined with a too-narrow catch-window, the daily run
+    window was missed for 4 days straight with zero notification, since every scheduled
+    check still reported "success" (the gate correctly, if unhelpfully, decided "not yet
+    time" each time — see screener/nhl_schedule_gate.py for the actual fix: a much wider
+    window). Checked once daily the following morning, by which point that day's window
+    has definitively closed one way or another.
+    """
+    if not SENDER or not APP_PASSWORD:
+        print(f"ERROR ALERT: Cannot send — Gmail credentials not set. NHL did not run on {missed_date}.")
+        return
+
+    subject = "NFL Betting Screener — NHL Did Not Run Yesterday"
+    body = f"""The NHL screener never actually screened yesterday ({missed_date}), even
+though there was a real NHL game that day (first game: {first_game_time.isoformat()}).
+
+Every scheduled check that day reported "success," but that just means the check ran
+cleanly and correctly decided it wasn't time yet — not that a real screening ever
+happened. This usually means GitHub's cron landed outside the daily catch-window every
+single time that day (a known platform reliability issue — see
+screener/nhl_schedule_gate.py's run_window_open).
+
+What to do:
+- Trigger a run manually right now if there's still time before tonight's games:
+  gh workflow run nhl_screener.yml
+- Forward this email to your Claude Code session and ask it to check whether the
+  catch-window needs widening further
+
+— NFL Betting Screener
+"""
+    _send(subject, body)
+
+
 def _send(subject, body):
     try:
         msg = MIMEText(body)
