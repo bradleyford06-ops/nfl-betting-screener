@@ -75,14 +75,27 @@ def mark_ran_today():
         f.write(str(datetime.now(PACIFIC_TZ).date()))
 
 
-def run_window_open(lead_time_minutes=60, poll_interval_minutes=45, now=None):
+def run_window_open(lead_time_minutes=240, poll_interval_minutes=225, now=None):
     """
     True if right now is when the NHL screener should actually run: starting
-    `lead_time_minutes` before today's first game and lasting `poll_interval_minutes`.
-    GitHub Actions cron checks land every 30 minutes (see nhl_screener.yml), so a window
-    of 45 gives a buffer against an occasional delayed or skipped tick — a wider window
-    only risks two checks landing inside it on rare occasions, and already_ran_today()
-    below fully prevents that from causing a double-run.
+    `lead_time_minutes` before today's first game and lasting `poll_interval_minutes`
+    (ending 15 minutes before puck drop either way, never after).
+
+    Widened from 60/45 (2026-10-03) after a real 4-day outage: GitHub's cron for this
+    workflow (`*/30 * * * *`, see nhl_screener.yml) is documented to land "every 30
+    minutes," but checking actual run timestamps showed real gaps of 3-7 hours between
+    executions, not 30 minutes — GitHub Actions scheduled triggers are well known to be
+    delayed or dropped under load, and this cron's old */30 (the unqualified "H:00"/"H:30"
+    marks) sits on the most congested timestamps on the platform. With only a 45-minute
+    window and ticks landing every several hours, nearly every day's window was being
+    missed entirely by chance — not a logic bug, a mismatch between an optimistic
+    assumption about cron reliability and a narrow catch-window. A 4-hour-wide window
+    makes it very likely at least one of a day's (now off-peak-scheduled, see the cron
+    change in nhl_screener.yml) infrequent ticks lands inside it, at the cost of
+    potentially screening a bit earlier than ideal relative to puck drop (goalie
+    confirmations may be less final several hours out vs. one hour out) —
+    already_ran_today() still guarantees only the first tick inside the window actually
+    screens, so this doesn't risk duplicate runs, just a wider net to catch one.
     """
     if already_ran_today():
         return False

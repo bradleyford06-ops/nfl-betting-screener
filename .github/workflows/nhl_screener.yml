@@ -2,11 +2,15 @@ name: NHL Betting Screener
 
 on:
   schedule:
-    # Every 30 minutes, all day. Actual screening only fires once a day, ~1 hour before
-    # that day's first NHL game (which varies a lot: weeknight evenings vs. weekend
-    # matinees) -- see screener/nhl_schedule_gate.py. Every other check is a cheap
-    # no-op: one NHL API call to check today's schedule, then exit immediately.
-    - cron: '*/30 * * * *'
+    # Every 30 minutes, all day, offset to :07/:37 rather than :00/:30 -- GitHub documents
+    # that scheduled triggers can be delayed under load, and the top of the hour/half-hour
+    # is the most congested time on the platform since so many repos default to */30 or
+    # */15. Found 2026-10-03 after a real 4-day outage: actual run timestamps showed gaps
+    # of 3-7 hours instead of the intended 30 minutes, which (combined with a too-narrow
+    # catch-window) meant the daily screening window was being missed almost every day --
+    # see screener/nhl_schedule_gate.py's run_window_open for the other half of this fix
+    # (a much wider window so a less-frequent or delayed tick still catches it).
+    - cron: '7,37 * * * *'
   workflow_dispatch:
 
 permissions:
