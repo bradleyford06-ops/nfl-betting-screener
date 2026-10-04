@@ -57,22 +57,46 @@ def first_game_time_today_pacific(today_pacific=None):
     return min(start_times) if start_times else None
 
 
-def already_ran_today():
-    """Whether the NHL screener has already run today (Pacific date) — a small marker
-    file, committed back to the repo the same way docs/index.html and ledger.db already
-    are, so it survives across the ephemeral GitHub Actions runners between checks."""
+def _ran_dates():
+    """Every Pacific date the NHL screener has successfully run on, as a set of date
+    strings — one per line in the marker file. An append-only log rather than a single
+    overwritten value (2026-10-04 fix, see mark_ran_today): a single mutable "last run
+    date" gets overwritten by each new day's success, so checking it after the fact for
+    "did day N run" silently breaks the moment day N+1 also succeeds first — found live
+    when check_nhl_daily_run.py false-alarmed about a real, already-confirmed-successful
+    Oct 3 run, because Oct 4's run (also successful, on its own) overwrote the marker
+    with "2026-10-04" before the (also GitHub-cron-delayed) watchdog got to check it."""
     if not os.path.exists(LAST_RUN_MARKER_PATH):
-        return False
+        return set()
     with open(LAST_RUN_MARKER_PATH) as f:
-        return f.read().strip() == str(datetime.now(PACIFIC_TZ).date())
+        return {line.strip() for line in f if line.strip()}
+
+
+def already_ran_today():
+    """Whether the NHL screener has already run today (Pacific date) — backed by a small
+    marker file, committed back to the repo the same way docs/index.html and ledger.db
+    already are, so it survives across the ephemeral GitHub Actions runners."""
+    return str(datetime.now(PACIFIC_TZ).date()) in _ran_dates()
+
+
+def ran_on(date):
+    """Whether the NHL screener successfully ran on a specific Pacific date (not just
+    today) — used by the daily watchdog to check yesterday's date without being fooled
+    by a more recent success. `date` is a date object or anything str()-able to
+    YYYY-MM-DD."""
+    return str(date) in _ran_dates()
 
 
 def mark_ran_today():
     """Record that the NHL screener has run today — call this only after a real, full
-    screening run completes successfully."""
+    screening run completes successfully. Appends rather than overwrites, so past dates
+    stay checkable (see _ran_dates); de-duplicates in case this is ever called twice in
+    one Pacific day."""
+    today_str = str(datetime.now(PACIFIC_TZ).date())
+    dates = _ran_dates() | {today_str}
     os.makedirs(os.path.dirname(LAST_RUN_MARKER_PATH), exist_ok=True)
     with open(LAST_RUN_MARKER_PATH, "w") as f:
-        f.write(str(datetime.now(PACIFIC_TZ).date()))
+        f.write("\n".join(sorted(dates)) + "\n")
 
 
 def run_window_open(lead_time_minutes=240, poll_interval_minutes=225, now=None):

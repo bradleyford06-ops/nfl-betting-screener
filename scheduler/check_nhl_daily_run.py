@@ -7,13 +7,12 @@ already rolled into a new calendar day — checking "today" at that point would 
 tonight's games, which haven't happened yet, instead of verifying last night's.
 """
 
-import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from screener.nhl_schedule_gate import first_game_time_today_pacific, PACIFIC_TZ, LAST_RUN_MARKER_PATH
+from screener.nhl_schedule_gate import first_game_time_today_pacific, PACIFIC_TZ, ran_on
 from email_report.error_alert import send_nhl_no_run_alert
 
 
@@ -24,12 +23,10 @@ def main():
         print(f"No NHL games on {yesterday_pacific} — nothing to check.")
         return
 
-    ran = False
-    if os.path.exists(LAST_RUN_MARKER_PATH):
-        with open(LAST_RUN_MARKER_PATH) as f:
-            ran = f.read().strip() == str(yesterday_pacific)
-
-    if ran:
+    # ran_on checks the specific date, not just "most recent success" -- a single
+    # mutable marker would be fooled the moment a later day's run also succeeds first
+    # (the exact false alarm found 2026-10-04 that this fix replaces).
+    if ran_on(yesterday_pacific):
         print(f"NHL screener ran successfully on {yesterday_pacific}.")
     else:
         print(f"NHL screener never ran on {yesterday_pacific} despite a game at {first_game.isoformat()} — sending alert.")
